@@ -1,7 +1,7 @@
 "use client";
-// 세션 상세 페이지 - 토론 로그 + 최종안 표시
+// 세션 상세 페이지 - 토론 로그 + 최종안 표시 (아코디언 접기/펼치기 지원)
 // running=true 쿼리 파라미터가 있으면 자동으로 AI 토론 실행
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -40,6 +40,9 @@ const ROLE_STYLES: Record<string, { border: string; badge: string; icon: string 
   moderator: { border: "border-purple-500/40 bg-purple-500/5", badge: "bg-purple-500/20 text-purple-400", icon: "⚖️" },
 };
 
+// 콘텐츠 미리보기 글자 수 제한 (접힌 상태)
+const PREVIEW_LENGTH = 150;
+
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -48,13 +51,39 @@ export default function SessionDetailPage() {
   const [runError, setRunError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // 왜: 각 항목의 펼침/접힘 상태를 개별 관리 (key = "rawInput" | message id | "moderator")
+  // 기본값은 "moderator"만 펼침 → 사용자가 가장 중요한 결과를 바로 볼 수 있음
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(["moderator"]));
+
+  const toggleItem = useCallback((itemId: string) => {
+    setExpandedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }, []);
+
+  // 전체 펼치기/접기
+  const toggleAll = useCallback(() => {
+    if (!session) return;
+    const allIds = ["rawInput", ...session.messages.map((m) => m.id), "moderator"];
+    const allExpanded = allIds.every((id) => expandedItems.has(id));
+    if (allExpanded) {
+      // 모두 접기 (moderator만 유지)
+      setExpandedItems(new Set(["moderator"]));
+    } else {
+      // 모두 펼치기
+      setExpandedItems(new Set(allIds));
+    }
+  }, [session, expandedItems]);
+
   async function fetchSession() {
     const res = await fetch(`/api/sessions/${id}`);
     const data = await res.json();
     if (data.success) setSession(data.data);
   }
 
-  // 페이지 진입 시 running=true면 자동 실행
   useEffect(() => {
     fetchSession().then(() => {
       if (searchParams.get("running") === "true") {
@@ -63,13 +92,10 @@ export default function SessionDetailPage() {
     });
   }, [id]);
 
-  // AI 토론 실행 - localStorage에서 설정값을 읽어 서버에 전달
   async function runDebate() {
     setRunning(true);
     setRunError("");
 
-    // 왜: 설정 페이지에서 저장한 API 키, 페르소나, 상위 지침을 서버에 전달해야
-    //      AI 호출이 정상적으로 이루어짐
     const apiKey = localStorage.getItem("debate_gemini_api_key") || undefined;
     const globalDirective = localStorage.getItem("debate_global_directive") || undefined;
     let personas;
@@ -90,10 +116,9 @@ export default function SessionDetailPage() {
     }
 
     setRunning(false);
-    fetchSession(); // 결과 새로고침
+    fetchSession();
   }
 
-  // 최종안 클립보드 복사
   async function copyFinalSummary() {
     if (!session?.finalSummary) return;
     const text = session.messages
@@ -168,7 +193,7 @@ export default function SessionDetailPage() {
         </div>
       )}
 
-      {/* 대기 상태 - 수동 실행 버튼 */}
+      {/* 대기 상태 */}
       {session.status === "pending" && !running && (
         <div className="glass rounded-2xl p-6 text-center border border-indigo-500/20">
           <p className="text-gray-300 mb-4">AI 토론을 시작할 준비가 되었습니다.</p>
@@ -181,31 +206,64 @@ export default function SessionDetailPage() {
         </div>
       )}
 
-      {/* 토론 로그 */}
+      {/* 토론 로그 (아코디언) */}
       {session.messages.length > 0 && !running && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white">토론 로그</h2>
+        <div className="space-y-3">
+          {/* 토론 로그 헤더 + 전체 토글 버튼 */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">토론 로그</h2>
+            <button
+              onClick={toggleAll}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 transition"
+            >
+              {session.messages.every((m) => expandedItems.has(m.id)) ? "📁 전체 접기" : "📂 전체 펼치기"}
+            </button>
+          </div>
 
-          {/* 입력 원문 */}
-          <div className="glass rounded-2xl p-5 border border-white/10">
-            <div className="flex items-center gap-2 mb-3">
+          {/* 기획 원문 - 아코디언 */}
+          <div className="glass rounded-2xl border border-white/10 overflow-hidden">
+            <button
+              onClick={() => toggleItem("rawInput")}
+              className="w-full flex items-center gap-2 p-4 hover:bg-white/5 transition text-left"
+            >
+              <span className="text-gray-500 text-xs transition-transform duration-200" style={{
+                display: "inline-block",
+                transform: expandedItems.has("rawInput") ? "rotate(90deg)" : "rotate(0deg)",
+              }}>▶</span>
               <span className="text-sm font-medium text-gray-400">📝 기획 원문</span>
-            </div>
-            <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{session.rawInput}</p>
-            {session.additionalConstraints && (
-              <div className="mt-3 pt-3 border-t border-white/10">
-                <p className="text-xs text-gray-500 mb-1">추가 조건</p>
-                <p className="text-gray-400 text-sm">{session.additionalConstraints}</p>
+              {!expandedItems.has("rawInput") && (
+                <span className="text-xs text-gray-600 ml-auto truncate max-w-[50%]">
+                  {session.rawInput.slice(0, 60)}...
+                </span>
+              )}
+            </button>
+            {expandedItems.has("rawInput") && (
+              <div className="px-5 pb-5 border-t border-white/5">
+                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap mt-3">{session.rawInput}</p>
+                {session.additionalConstraints && (
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <p className="text-xs text-gray-500 mb-1">추가 조건</p>
+                    <p className="text-gray-400 text-sm">{session.additionalConstraints}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* A/B 메시지 */}
+          {/* 페르소나 메시지 - 아코디언 */}
           {session.messages.map((msg) => {
             const style = ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a;
+            const isExpanded = expandedItems.has(msg.id);
             return (
-              <div key={msg.id} className={`glass rounded-2xl p-5 border ${style.border}`}>
-                <div className="flex items-center gap-2 mb-3">
+              <div key={msg.id} className={`glass rounded-2xl border ${style.border} overflow-hidden`}>
+                <button
+                  onClick={() => toggleItem(msg.id)}
+                  className="w-full flex items-center gap-2 p-4 hover:bg-white/5 transition text-left"
+                >
+                  <span className="text-gray-500 text-xs transition-transform duration-200" style={{
+                    display: "inline-block",
+                    transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                  }}>▶</span>
                   <span>{style.icon}</span>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${style.badge}`}>
                     {msg.speaker}
@@ -213,19 +271,28 @@ export default function SessionDetailPage() {
                   {msg.roundNo > 0 && (
                     <span className="text-xs text-gray-600">Round {msg.roundNo}</span>
                   )}
-                </div>
-                <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-                  {msg.content}
-                </div>
+                  {!isExpanded && (
+                    <span className="text-xs text-gray-600 ml-auto truncate max-w-[40%]">
+                      {msg.content.slice(0, PREVIEW_LENGTH).replace(/\n/g, " ")}...
+                    </span>
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="px-5 pb-5 border-t border-white/5">
+                    <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap mt-3">
+                      {msg.content}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* 최종 요약 */}
+      {/* 최종 요약 - 항상 펼쳐진 상태이나 토글 가능 */}
       {isCompleted && session.finalSummary && !running && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
             <h2 className="text-lg font-semibold text-white">⚖️ Moderator 최종 기획안</h2>
             <button
@@ -235,24 +302,33 @@ export default function SessionDetailPage() {
               {copied ? "✅ 복사됨" : "📋 복사"}
             </button>
           </div>
-          <div className="moderator rounded-2xl p-6 border">
-            <p className="text-gray-300 text-base font-medium mb-2">
-              {session.finalSummary.finalBrief}
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-purple-400 font-medium mb-1">🚀 추천 MVP</p>
-                <p className="text-gray-400 whitespace-pre-wrap">{session.finalSummary.recommendedMvp}</p>
+          <div className="glass rounded-2xl border border-purple-500/30 overflow-hidden">
+            <button
+              onClick={() => toggleItem("moderator")}
+              className="w-full flex items-center gap-2 p-4 hover:bg-white/5 transition text-left"
+            >
+              <span className="text-gray-500 text-xs transition-transform duration-200" style={{
+                display: "inline-block",
+                transform: expandedItems.has("moderator") ? "rotate(90deg)" : "rotate(0deg)",
+              }}>▶</span>
+              <span className="text-sm font-medium text-purple-400">최종 기획서</span>
+              {!expandedItems.has("moderator") && (
+                <span className="text-xs text-gray-600 ml-auto">클릭하여 펼치기</span>
+              )}
+            </button>
+            {expandedItems.has("moderator") && (
+              <div className="px-5 pb-5 border-t border-white/5">
+                <p className="text-gray-300 text-base font-medium mb-2 mt-3">
+                  {session.finalSummary.finalBrief}
+                </p>
+                {/* Moderator 전문 표시 */}
+                {session.messages.find((m) => m.roleType === "moderator") && (
+                  <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap mt-3 pt-3 border-t border-white/10">
+                    {session.messages.find((m) => m.roleType === "moderator")!.content}
+                  </div>
+                )}
               </div>
-              <div>
-                <p className="text-purple-400 font-medium mb-1">⚠️ 리스크</p>
-                <ul className="text-gray-400 space-y-1">
-                  {(JSON.parse(session.finalSummary.risks) as string[]).map((r, i) => (
-                    <li key={i}>• {r}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
