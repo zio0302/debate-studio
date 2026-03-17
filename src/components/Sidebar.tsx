@@ -12,6 +12,7 @@ const navItems = [
   { href: "/dashboard", label: "대시보드", icon: "🏠" },
   { href: "/projects", label: "프로젝트", icon: "📁" },
   { href: "/history", label: "히스토리", icon: "📋" },
+  { href: "/settings", label: "설정", icon: "⚙️" },
 ];
 
 export default function Sidebar({ user }: SidebarProps) {
