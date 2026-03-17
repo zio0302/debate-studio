@@ -52,7 +52,8 @@ async function getSessionMessages(sessionId: string) {
 export async function runDebateSession(
   sessionId: string,
   personas: PersonaConfig[],
-  apiKey?: string
+  apiKey?: string,
+  globalDirective?: string
 ): Promise<void> {
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
   if (!session) throw new Error(`세션을 찾을 수 없음: ${sessionId}`);
@@ -94,12 +95,28 @@ export async function runDebateSession(
           outputTone: session.outputTone ?? "standard",
         });
 
+        // 상위 지침이 있으면 시스템 프롬프트의 최상단에 절대적 우선순위로 주입
+        // 왜: 사용자가 설정한 비즈니스 맥락/제약 조건이 모든 페르소나의 개별 역할보다 우선해야 함
+        const fullSystemPrompt = globalDirective
+          ? `###### ⚠️ 절대적 상위 지침 (SUPREME DIRECTIVE) ⚠️ ######
+아래 상위 지침은 당신의 모든 판단과 발언에 최우선으로 적용됩니다.
+이 지침에 위배되는 의견이나 제안은 절대로 하지 마세요.
+당신의 전문 역할(페르소나)은 반드시 이 상위 지침의 범위 안에서만 수행하세요.
+토론의 모든 판단 기준, 제안, 평가는 이 지침을 기반으로 해야 합니다.
+
+${globalDirective}
+
+###### 상위 지침 끝 ######
+
+${persona.systemPrompt}`
+          : persona.systemPrompt;
+
         let response;
         try {
-          response = await callGemini(persona.systemPrompt, context, apiKey);
+          response = await callGemini(fullSystemPrompt, context, apiKey);
         } catch {
-          // 1회 재시도
-          response = await callGemini(persona.systemPrompt, context, apiKey);
+          // 1회 재시도 (공통 지침 포함된 프롬프트로 재시도)
+          response = await callGemini(fullSystemPrompt, context, apiKey);
         }
 
         await saveMessage({

@@ -9,6 +9,7 @@ interface SidebarProps {
 }
 
 const navItems = [
+  { href: "/directive", label: "상위 지침", icon: "📌" },
   { href: "/dashboard", label: "대시보드", icon: "🏠" },
   { href: "/projects", label: "프로젝트", icon: "📁" },
   { href: "/history", label: "히스토리", icon: "📋" },
