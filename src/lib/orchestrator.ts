@@ -63,6 +63,8 @@ export async function runDebateSession(
   const activePersonas = personas.filter((p) => p.active);
   if (activePersonas.length < 2) throw new Error("최소 2명의 페르소나가 필요합니다.");
 
+  // 왜: stuck된 세션 재실행 시 기존 상태를 리셋해야 함
+  // running/failed 상태의 세션이 재시작될 때 startedAt을 갱신
   await db.update(sessions)
     .set({ status: "running", startedAt: new Date() })
     .where(eq(sessions.id, sessionId));

@@ -152,7 +152,7 @@ export default function SessionDetailPage() {
             running ? "bg-yellow-500/20 text-yellow-400" :
             "bg-gray-500/20 text-gray-400"
           }`}>
-            {running ? "🔄 토론 중..." : isCompleted ? "✅ 완료" : isFailed ? "❌ 실패" : "⏳ 대기"}
+            {running ? "🔄 토론 중..." : isCompleted ? "✅ 완료" : isFailed ? "❌ 실패" : session.status === "running" ? "⏳ 실행 중" : "⏳ 대기"}
           </span>
         </div>
         <p className="text-gray-500 text-sm mt-1">{session.rounds}라운드 · {session.outputTone} 톤</p>
@@ -193,15 +193,20 @@ export default function SessionDetailPage() {
         </div>
       )}
 
-      {/* 대기 상태 */}
-      {session.status === "pending" && !running && (
+      {/* 대기/멈춤 상태 - 실행/재시도 버튼 */}
+      {(session.status === "pending" || session.status === "running") && !running && (
         <div className="glass rounded-2xl p-6 text-center border border-indigo-500/20">
-          <p className="text-gray-300 mb-4">AI 토론을 시작할 준비가 되었습니다.</p>
+          <p className="text-gray-300 mb-2">
+            {session.status === "running" ? "⚠️ 토론이 멈춘 것 같습니다." : "AI 토론을 시작할 준비가 되었습니다."}
+          </p>
+          {session.status === "running" && (
+            <p className="text-gray-500 text-sm mb-4">Vercel 타임아웃 등으로 실행이 중단되었을 수 있습니다.</p>
+          )}
           <button
             onClick={runDebate}
             className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
           >
-            ⚡ 토론 시작
+            {session.status === "running" ? "🔄 다시 시도" : "⚡ 토론 시작"}
           </button>
         </div>
       )}

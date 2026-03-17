@@ -30,28 +30,36 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!session) {
     return NextResponse.json({ success: false, data: null, error: "세션을 찾을 수 없습니다." }, { status: 404 });
   }
+  // 왜: Vercel Hobby 플랜의 60초 타임아웃으로 세션이 running 상태로 잠길 수 있음
+  // 5분 이상 running이면 stuck으로 간주하고 재실행 허용
   if (session.status === "running") {
-    return NextResponse.json({ success: false, data: null, error: "이미 실행 중인 세션입니다." }, { status: 409 });
+    const startedAt = session.startedAt ? new Date(session.startedAt).getTime() : 0;
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    if (startedAt > fiveMinutesAgo) {
+      return NextResponse.json({ success: false, data: null, error: "이미 실행 중인 세션입니다. 5분 후 재시도해주세요." }, { status: 409 });
+    }
+    // 5분 이상 stuck → 상태 리셋 후 재실행 허용
+    console.log(`[API] 세션 ${sessionId}이 5분 이상 running 상태 → 리셋 후 재실행`);
   }
   if (session.status === "completed") {
     return NextResponse.json({ success: false, data: null, error: "이미 완료된 세션입니다." }, { status: 409 });
   }
 
   // 클라이언트에서 페르소나 설정과 API 키를 받아옴
-  let body: { personas?: PersonaConfig[]; apiKey?: string } = {};
+  let body: { personas?: PersonaConfig[]; apiKey?: string; globalDirective?: string } = {};
   try {
     body = await req.json();
   } catch {
     // body 없으면 기본값 사용
   }
 
-  // 페르소나 설정: 클라이언트 제공 or 기본값
   const personas: PersonaConfig[] = body.personas ?? DEFAULT_PERSONAS;
-  // API 키: 클라이언트 제공 or 환경변수 (orchestrator 내부에서 처리)
   const apiKey = body.apiKey || undefined;
+  const globalDirective = body.globalDirective || undefined;
 
   try {
-    await runDebateSession(sessionId, personas, apiKey);
+    // 왜: globalDirective를 전달해야 상위 지침이 모든 페르소나에 적용됨
+    await runDebateSession(sessionId, personas, apiKey, globalDirective);
     const [finalSummary] = await db.select().from(finalSummaries).where(eq(finalSummaries.sessionId, sessionId)).limit(1);
     return NextResponse.json({ success: true, data: { sessionId, finalSummary: finalSummary ?? null }, error: null });
   } catch (err) {
