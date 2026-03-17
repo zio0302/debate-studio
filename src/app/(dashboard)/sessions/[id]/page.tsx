@@ -63,12 +63,26 @@ export default function SessionDetailPage() {
     });
   }, [id]);
 
-  // AI 토론 실행
+  // AI 토론 실행 - localStorage에서 설정값을 읽어 서버에 전달
   async function runDebate() {
     setRunning(true);
     setRunError("");
 
-    const res = await fetch(`/api/sessions/${id}/run`, { method: "POST" });
+    // 왜: 설정 페이지에서 저장한 API 키, 페르소나, 상위 지침을 서버에 전달해야
+    //      AI 호출이 정상적으로 이루어짐
+    const apiKey = localStorage.getItem("debate_gemini_api_key") || undefined;
+    const globalDirective = localStorage.getItem("debate_global_directive") || undefined;
+    let personas;
+    try {
+      const stored = localStorage.getItem("debate_personas");
+      if (stored) personas = JSON.parse(stored);
+    } catch { /* 기본값 사용 */ }
+
+    const res = await fetch(`/api/sessions/${id}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, personas, globalDirective }),
+    });
     const data = await res.json();
 
     if (!data.success) {
