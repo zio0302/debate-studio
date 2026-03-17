@@ -1,0 +1,90 @@
+// Debate Studio - Prisma 스키마 (SQLite MVP)
+// 추후 PostgreSQL(Supabase) 마이그레이션 시 provider만 교체하면 됨
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 사용자 테이블
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  password  String    // bcrypt 해싱된 비밀번호
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  projects  Project[]
+  sessions  Session[]
+}
+
+// 프로젝트 테이블 (여러 세션을 담는 컨테이너)
+model Project {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  defaultMode String    @default("strategy_vs_execution") // 기본 토론 모드
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? // soft delete
+
+  user     User      @relation(fields: [userId], references: [id])
+  sessions Session[]
+}
+
+// 세션 테이블 (하나의 토론 단위)
+model Session {
+  id                    String    @id @default(cuid())
+  projectId             String
+  userId                String
+  title                 String
+  rawInput              String    // 사용자의 기획안 원문
+  additionalConstraints String?   // 추가 조건 (예산, 일정 등)
+  rounds                Int       @default(2) // 토론 라운드 수
+  outputTone            String    @default("standard") // 결과 톤: concise/standard/detailed
+  status                String    @default("pending") // pending/running/completed/failed
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  project      Project       @relation(fields: [projectId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  messages     Message[]
+  finalSummary FinalSummary?
+}
+
+// 메시지 테이블 (토론 로그, append-only 구조)
+model Message {
+  id               String   @id @default(cuid())
+  sessionId        String
+  roleType         String   // user_input / persona_a / persona_b / moderator
+  speaker          String   // "사용자" / "전략 기획가 A" / "실행 책임자 B" / "Moderator"
+  roundNo          Int      @default(0) // 0: 초기 입력, 1~N: 토론 라운드
+  content          String   // AI 응답 내용
+  tokenUsageInput  Int?     // 입력 토큰 수 (비용 추적)
+  tokenUsageOutput Int?     // 출력 토큰 수 (비용 추적)
+  createdAt        DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id])
+}
+
+// 최종 요약 테이블 (Moderator가 생성한 최종안, 별도 저장으로 조회 최적화)
+model FinalSummary {
+  id              String   @id @default(cuid())
+  sessionId       String   @unique
+  finalBrief      String   // 최종 컨셉 정의
+  keyIssues       String   // 핵심 쟁점 (JSON 문자열)
+  recommendedMvp  String   // 추천 MVP 범위
+  risks           String   // 리스크 (JSON 문자열)
+  nextActions     String   // 다음 액션 (JSON 문자열)
+  createdAt       DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id])
+}
