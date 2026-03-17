@@ -5,6 +5,10 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+// localStorage 키 (설정 페이지와 동일한 상수사용)
+const STORAGE_KEY_API = "debate_gemini_api_key";
+const STORAGE_KEY_PERSONAS = "debate_personas";
+
 // ─── 타입 정의 ───────────────────────────────────
 
 interface Message {
@@ -76,6 +80,8 @@ export default function SessionDetailPage() {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState("");
   const [copied, setCopied] = useState(false);
+  // 접힌/펼쳙 상태 (message id Set)
+  const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
 
   // Moderator 채팅 상태
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -104,9 +110,20 @@ export default function SessionDetailPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [streamingMessages, currentStreamIndex]);
 
+  // 메시지 접기/펼치기 토글
+  function toggleCollapse(id: string) {
+    setCollapsedMessages((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   /**
    * SSE 기반 AI 토론 실행
    * fetch + ReadableStream으로 POST 요청 후 SSE 이벤트 수신
+   * localStorage에서 API 키와 페르소나 설정 읽어 전달
    */
   async function runDebate() {
     setRunning(true);
@@ -114,12 +131,18 @@ export default function SessionDetailPage() {
     setStreamingMessages([]);
     setCurrentStreamIndex(-1);
 
+    // 설정 페이지에서 저장한 API 키 및 페르소나 읽기
+    const savedApiKey = localStorage.getItem(STORAGE_KEY_API) || undefined;
+    const savedPersonas = localStorage.getItem(STORAGE_KEY_PERSONAS);
+    const personas = savedPersonas ? JSON.parse(savedPersonas) : undefined;
+
     try {
       // POST로 personas, apiKey 전달하면서 SSE 스트림 연결
       const response = await fetch(`/api/sessions/${id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}), // 기본 페르소나 사용
+        // localStorage에서 읽은 API 키와 페르소나를 서버에 전달
+        body: JSON.stringify({ apiKey: savedApiKey, personas }),
       });
 
       if (!response.body) throw new Error("스트림을 받을 수 없습니다.");
@@ -223,8 +246,7 @@ export default function SessionDetailPage() {
   }
 
   /**
-   * Moderator 채팅 전송
-   * SSE 스트리밍으로 Moderator 응답 실시간 수신
+   * Moderator 채팅 전송 - localStorage에서 API 키 읽어 함께 전달
    */
   async function sendChatMessage() {
     if (!chatInput.trim() || chatLoading) return;
@@ -232,6 +254,9 @@ export default function SessionDetailPage() {
     const userMessage = chatInput.trim();
     setChatInput("");
     setChatLoading(true);
+
+    // 설정 페이지에서 저장한 API 키 읽기
+    const savedApiKey = localStorage.getItem(STORAGE_KEY_API) || undefined;
 
     // 사용자 메시지 추가
     setChatMessages((prev) => [...prev, { role: "user", content: userMessage }]);
@@ -243,7 +268,8 @@ export default function SessionDetailPage() {
       const response = await fetch(`/api/sessions/${id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage }),
+        // API 키를 서버에 함께 전달
+        body: JSON.stringify({ message: userMessage, apiKey: savedApiKey }),
       });
 
       if (!response.body) throw new Error("스트림을 받을 수 없습니다.");
@@ -421,9 +447,16 @@ export default function SessionDetailPage() {
           {/* 토론 완료 후: DB에서 로드한 메시지 */}
           {!running && session.messages.map((msg) => {
             const style = ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a;
+            const isCollapsed = collapsedMessages.has(msg.id);
+            // 요약: 첫 80자
+            const preview = msg.content.replace(/\n/g, " ").substring(0, 80);
             return (
-              <div key={msg.id} className={`glass rounded-2xl p-5 border ${style.border}`}>
-                <div className="flex items-center gap-2 mb-3">
+              <div key={msg.id} className={`glass rounded-2xl border ${style.border}`}>
+                {/* 헤더 영역 - 클릭하면 접기/펼치기 */}
+                <div
+                  className="flex items-center gap-2 p-5 cursor-pointer select-none"
+                  onClick={() => toggleCollapse(msg.id)}
+                >
                   <span>{style.icon}</span>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${style.badge}`}>
                     {msg.speaker}
@@ -431,10 +464,22 @@ export default function SessionDetailPage() {
                   {msg.roundNo > 0 && (
                     <span className="text-xs text-gray-600">Round {msg.roundNo}</span>
                   )}
+                  <span className="ml-auto text-gray-600 text-xs flex items-center gap-1">
+                    {isCollapsed ? (
+                      <>▼ 펼치기</>
+                    ) : (
+                      <>▲ 접기</>
+                    )}
+                  </span>
                 </div>
-                <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-                  {msg.content}
-                </div>
+                {/* 취소 시 요약, 펼치면 전체 */}
+                {isCollapsed ? (
+                  <p className="px-5 pb-4 text-gray-500 text-xs truncate">{preview}...</p>
+                ) : (
+                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
+                  </div>
+                )}
               </div>
             );
           })}
