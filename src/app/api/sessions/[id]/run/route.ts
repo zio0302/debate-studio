@@ -7,6 +7,11 @@ import { runDebateSession, PersonaConfig } from "@/lib/orchestrator";
 import { eq, and } from "drizzle-orm";
 import { DEFAULT_PERSONAS } from "@/lib/prompts";
 
+// Vercel 서버리스 함수 최대 실행 시간 설정 (초)
+// 왜: AI 토론은 여러 번의 Gemini API 호출이 순차적으로 일어나므로 긴 실행 시간 필요
+// Hobby: 최대 60초, Pro: 최대 300초로 자동 조정됨
+export const maxDuration = 300;
+
 type Params = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Params) {

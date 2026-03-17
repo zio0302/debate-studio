@@ -40,7 +40,10 @@ export async function callGemini(
     safetySettings,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,        // 충분한 기획서 분량을 위해 확대 (2048→4096)
+      // gemini-2.5-flash의 thinking 시간을 제한하여 응답 속도 개선
+      // @ts-expect-error - thinking config는 최신 SDK에서 지원
+      thinkingConfig: { thinkingBudget: 1024 },
     },
   });
 
