@@ -61,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   await db.update(projects).set({
     title: body.title ?? project.title,
     description: body.description ?? project.description,
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(),
   }).where(eq(projects.id, id));
 
   const [updated] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
@@ -80,6 +80,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ success: false, data: null, error: "프로젝트를 찾을 수 없습니다." }, { status: 404 });
   }
 
-  await db.update(projects).set({ deletedAt: new Date().toISOString() }).where(eq(projects.id, id));
+  await db.update(projects).set({ deletedAt: new Date() }).where(eq(projects.id, id));
   return NextResponse.json({ success: true, data: null, error: null });
 }
