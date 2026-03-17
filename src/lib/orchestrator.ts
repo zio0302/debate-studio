@@ -6,6 +6,11 @@ import { callGeminiStream, callGemini } from "./gemini";
 import { MODERATOR_SYSTEM_PROMPT, buildDebateContext } from "./prompts";
 import { eq, asc } from "drizzle-orm";
 
+// 무료 티어 RPM(분당 15회) 초과 방지를 위한 호출 간 딜레이
+// 4초 간격 = 분당 최대 15회 이내 유지
+const INTER_CALL_DELAY_MS = 4000;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // 페르소나 정의 타입 - 클라이언트에서 커스터마이징 가능
 export interface PersonaConfig {
   id: "a" | "b" | "c" | "d";
@@ -152,6 +157,16 @@ export async function runDebateSessionStream(
           tokenUsageInput: response.tokenUsageInput,
           tokenUsageOutput: response.tokenUsageOutput,
         });
+
+        send("message_done", {
+          speaker: persona.name,
+          roundNo: round,
+          content: response.content,
+          roleType: `persona_${persona.id}`,
+        });
+
+        // 무료 티어 RPM 초과 방지: 다음 페르소나 호출 전 딜레이
+        await sleep(INTER_CALL_DELAY_MS);
 
         send("message_done", {
           speaker: persona.name,

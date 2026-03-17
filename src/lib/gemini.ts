@@ -16,12 +16,27 @@ export interface GeminiResponse {
   tokenUsageOutput: number;
 }
 
+// 429 오류 메시지에서 "retry in Xs" 초를 파싱하는 헬퍼
+function parseRetryDelay(errorMessage: string): number {
+  const match = errorMessage.match(/retry in (\d+)/i);
+  // 명시된 대기 시간 + 5초 여유 (기본값 65초)
+  return match ? parseInt(match[1], 10) * 1000 + 5000 : 65000;
+}
+
+// 지정한 ms만큼 대기
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 429 오류인지 확인
+function isRateLimitError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
+}
+
 /**
  * Gemini API를 호출하여 응답을 받아옴 (일반 버전 - 완성된 응답 반환)
- * @param systemPrompt - 페르소나 정의 시스템 프롬프트
- * @param userMessage  - 실제 사용자/컨텍스트 메시지
- * @param apiKey       - 클라이언트에서 전달한 API 키 (없으면 env 변수 사용)
- * @param modelName    - 사용할 모델 (기본: gemini-2.0-flash)
+ * 429 오류 시 자동으로 1회 재시도 (자동 대기 후)
  */
 export async function callGemini(
   systemPrompt: string,
@@ -29,7 +44,6 @@ export async function callGemini(
   apiKey?: string,
   modelName: string = "gemini-2.0-flash"
 ): Promise<GeminiResponse> {
-  // 클라이언트 제공 API 키 우선, 없으면 환경변수 사용
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
 
@@ -38,31 +52,38 @@ export async function callGemini(
     model: modelName,
     systemInstruction: systemPrompt,
     safetySettings,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-    },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
   });
 
-  const result = await model.generateContent(userMessage);
-  const response = result.response;
-  const content = response.text();
+  async function attempt(): Promise<GeminiResponse> {
+    const result = await model.generateContent(userMessage);
+    const response = result.response;
+    const content = response.text();
+    const usageMeta = response.usageMetadata;
+    return {
+      content,
+      tokenUsageInput: usageMeta?.promptTokenCount ?? 0,
+      tokenUsageOutput: usageMeta?.candidatesTokenCount ?? 0,
+    };
+  }
 
-  const usageMeta = response.usageMetadata;
-  const tokenUsageInput = usageMeta?.promptTokenCount ?? 0;
-  const tokenUsageOutput = usageMeta?.candidatesTokenCount ?? 0;
-
-  return { content, tokenUsageInput, tokenUsageOutput };
+  try {
+    return await attempt();
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      const waitMs = parseRetryDelay(error instanceof Error ? error.message : "");
+      console.warn(`[Gemini] 429 Rate Limit - ${waitMs / 1000}초 대기 후 재시도...`);
+      await sleep(waitMs);
+      return await attempt(); // 1회 재시도
+    }
+    throw error;
+  }
 }
 
 /**
  * Gemini API 스트리밍 버전 - 청크 단위로 onChunk 콜백 호출
- * SSE 스트리밍에 사용. 응답이 생성되는 즉시 클라이언트로 전달 가능.
- * @param systemPrompt - 페르소나 시스템 프롬프트
- * @param userMessage  - 컨텍스트 메시지
- * @param apiKey       - 클라이언트 API 키 (없으면 env 변수)
- * @param onChunk      - 텍스트 청크 수신 시 호출될 콜백
- * @param modelName    - 사용할 모델
+ * 429 오류 시 지정 대기 후 자동 재시도 (최대 2회)
+ * 무료 티어: 분당 15회 제한 → 페르소나 간 딜레이(orchestrator)와 함께 사용
  */
 export async function callGeminiStream(
   systemPrompt: string,
@@ -79,30 +100,51 @@ export async function callGeminiStream(
     model: modelName,
     systemInstruction: systemPrompt,
     safetySettings,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-    },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
   });
 
-  // generateContentStream: 청크 단위로 응답 생성
-  const result = await model.generateContentStream(userMessage);
+  // 최대 2번 재시도 (429 대기 포함)
+  const MAX_RETRIES = 2;
 
-  let fullContent = "";
-  // 각 청크를 즉시 콜백으로 전달하여 실시간 스트리밍 구현
-  for await (const chunk of result.stream) {
-    const text = chunk.text();
-    if (text) {
-      fullContent += text;
-      onChunk(text);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await model.generateContentStream(userMessage);
+
+      let fullContent = "";
+      for await (const chunk of result.stream) {
+        const text = chunk.text();
+        if (text) {
+          fullContent += text;
+          onChunk(text);
+        }
+      }
+
+      const finalResponse = await result.response;
+      const usageMeta = finalResponse.usageMetadata;
+      return {
+        content: fullContent,
+        tokenUsageInput: usageMeta?.promptTokenCount ?? 0,
+        tokenUsageOutput: usageMeta?.candidatesTokenCount ?? 0,
+      };
+
+    } catch (error) {
+      const isLastAttempt = attempt === MAX_RETRIES;
+
+      if (isRateLimitError(error) && !isLastAttempt) {
+        // 429: 오류 메시지에서 대기 시간 파싱 후 자동 대기
+        const waitMs = parseRetryDelay(error instanceof Error ? error.message : "");
+        console.warn(`[Gemini Stream] 429 Rate Limit - ${waitMs / 1000}초 대기 후 재시도 (${attempt + 1}/${MAX_RETRIES})...`);
+        // 클라이언트에 대기 중임을 알림 (빈 청크 대신 상태 알림)
+        onChunk(`\n\n⏳ API 요청 한도 초과. ${Math.round(waitMs / 1000)}초 후 자동 재시도합니다...\n\n`);
+        await sleep(waitMs);
+        // 재시도 전 이전에 보낸 임시 메시지 제거를 알림
+        continue;
+      }
+
+      throw error; // 마지막 시도 실패이거나 429가 아닌 오류면 그냥 throw
     }
   }
 
-  // 스트림 완료 후 최종 응답에서 토큰 사용량 조회
-  const finalResponse = await result.response;
-  const usageMeta = finalResponse.usageMetadata;
-  const tokenUsageInput = usageMeta?.promptTokenCount ?? 0;
-  const tokenUsageOutput = usageMeta?.candidatesTokenCount ?? 0;
-
-  return { content: fullContent, tokenUsageInput, tokenUsageOutput };
+  // 여기까지 오면 안 되지만 타입 만족을 위해
+  throw new Error("최대 재시도 횟수 초과");
 }
