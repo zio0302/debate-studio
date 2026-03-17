@@ -27,7 +27,7 @@ export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string,
-  modelName: string = "gemini-2.0-flash"
+  modelName: string = "gemini-2.5-flash"
 ): Promise<GeminiResponse> {
   // 클라이언트 제공 API 키 우선, 없으면 환경변수 사용
   const key = apiKey || process.env.GEMINI_API_KEY;
