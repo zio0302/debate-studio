@@ -48,7 +48,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const body = await req.json();
     const parsed = createSessionSchema.safeParse(body);
-    if (!parsed.success) return NextResponse.json({ success: false, data: null, error: parsed.error.errors[0].message }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ success: false, data: null, error: parsed.error.issues[0].message }, { status: 400 });
 
     // PostgreSQL: UUID 자동생성, .returning()으로 값 반환
     const [newSession] = await db.insert(sessions).values({
