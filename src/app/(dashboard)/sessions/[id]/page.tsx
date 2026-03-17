@@ -1,7 +1,7 @@
 "use client";
 // 세션 상세 페이지 - 토론 로그 + 최종안 표시 (아코디언 접기/펼치기 지원)
 // running=true 쿼리 파라미터가 있으면 자동으로 AI 토론 실행
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -50,6 +50,61 @@ export default function SessionDetailPage() {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // 왜: 진행률 표시를 위해 폴링 중 상태 관리
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
+  const [totalSteps, setTotalSteps] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 진행률 폴링 - running 상태일 때 3초 간격 조회
+  useEffect(() => {
+    if (!running) {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      return;
+    }
+
+    async function pollProgress() {
+      try {
+        const res = await fetch(`/api/sessions/${id}/progress`);
+        const data = await res.json();
+        if (!data.success) return;
+
+        const { messageCount, rounds, lastSpeaker, lastRound, status } = data.data;
+
+        // 페르소나 수는 localStorage에서 가져옴 (기본 4명)
+        let personaCount = 4;
+        try {
+          const stored = localStorage.getItem("debate_personas");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            personaCount = parsed.filter((p: { active: boolean }) => p.active).length;
+          }
+        } catch { /* 기본값 사용 */ }
+
+        const total = (personaCount * (rounds ?? 2)) + 1; // +1 = Moderator
+        setTotalSteps(total);
+
+        const pct = Math.min(Math.round((messageCount / total) * 100), 99);
+        setProgress(pct);
+
+        if (lastSpeaker) {
+          setProgressLabel(`${lastSpeaker} Round ${lastRound} 완료`);
+        }
+
+        // 완료/실패 감지 → 즉시 종료
+        if (status === "completed" || status === "failed") {
+          setRunning(false);
+          setProgress(status === "completed" ? 100 : 0);
+          fetchSession();
+        }
+      } catch { /* 네트워크 에러 무시 */ }
+    }
+
+    pollProgress(); // 즉시 1회
+    pollingRef.current = setInterval(pollProgress, 3000);
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+  }, [running, id]);
 
   // 왜: 각 항목의 펼침/접힘 상태를 개별 관리 (key = "rawInput" | message id | "moderator")
   // 기본값은 "moderator"만 펼침 → 사용자가 가장 중요한 결과를 바로 볼 수 있음
@@ -158,25 +213,44 @@ export default function SessionDetailPage() {
         <p className="text-gray-500 text-sm mt-1">{session.rounds}라운드 · {session.outputTone} 톤</p>
       </div>
 
-      {/* 실행 중 로딩 */}
+      {/* 실행 중 - 진행률 바 */}
       {running && (
-        <div className="glass rounded-2xl p-8 text-center border border-indigo-500/30">
-          <div className="flex justify-center gap-4 mb-4">
-            <span className="text-3xl animate-bounce" style={{ animationDelay: "0ms" }}>🎯</span>
-            <span className="text-3xl animate-bounce" style={{ animationDelay: "200ms" }}>⚔️</span>
-            <span className="text-3xl animate-bounce" style={{ animationDelay: "400ms" }}>🔧</span>
+        <div className="glass rounded-2xl p-6 border border-indigo-500/30 space-y-4">
+          {/* 헤더 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="text-2xl animate-bounce" style={{ animationDelay: `${i * 200}ms` }}>
+                    {["🎯", "⚔️", "🔧"][i]}
+                  </span>
+                ))}
+              </div>
+              <p className="text-gray-200 font-medium">AI 토론 진행 중</p>
+            </div>
+            <span className="text-2xl font-bold text-indigo-400">{progress}%</span>
           </div>
-          <p className="text-gray-300 font-medium">AI 전문가들이 기획안을 검토하고 있습니다...</p>
-          <p className="text-gray-500 text-sm mt-1">라운드 수에 따라 30초~2분 소요될 수 있습니다.</p>
-          <div className="mt-4 flex justify-center gap-1">
-            {[0.1, 0.2, 0.3, 0.4, 0.5].map((delay) => (
-              <div
-                key={delay}
-                className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"
-                style={{ animationDelay: `${delay}s` }}
-              />
-            ))}
+
+          {/* 프로그레스 바 */}
+          <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-purple-500 transition-all duration-700 ease-out"
+              style={{ width: `${Math.max(progress, 2)}%` }}
+            />
           </div>
+
+          {/* 현재 단계 */}
+          <div className="flex items-center justify-between text-sm">
+            <p className="text-gray-400">
+              {progressLabel || "첫 번째 페르소나 응답 대기 중..."}
+            </p>
+            <p className="text-gray-600">
+              {totalSteps > 0 ? `${Math.round(progress * totalSteps / 100)}/${totalSteps} 단계` : ""}
+            </p>
+          </div>
+
+          {/* 소요 시간 안내 */}
+          <p className="text-gray-600 text-xs text-center">라운드 수에 따라 30초~2분 소요될 수 있습니다</p>
         </div>
       )}
 
