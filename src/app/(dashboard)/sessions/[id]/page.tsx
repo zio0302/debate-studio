@@ -90,11 +90,19 @@ export default function SessionDetailPage() {
 
   // 자동 스크롤용 ref
   const bottomRef = useRef<HTMLDivElement>(null);
+  // 토론 정지용 AbortController ref (fetch 스트림 중단에 사용)
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   async function fetchSession() {
     const res = await fetch(`/api/sessions/${id}`);
     const data = await res.json();
-    if (data.success) setSession(data.data);
+    if (data.success) {
+      setSession(data.data);
+      // 토론 완료 후 페르소나 메시지는 기본 접힘 상태로 설정 (moderator 기획안은 펼침 유지)
+      const msgs: Message[] = data.data?.messages ?? [];
+      const personaIds = new Set(msgs.filter((m: Message) => m.roleType !== "moderator").map((m: Message) => m.id));
+      setCollapsedMessages(personaIds);
+    }
   }
 
   useEffect(() => {
@@ -125,11 +133,19 @@ export default function SessionDetailPage() {
    * fetch + ReadableStream으로 POST 요청 후 SSE 이벤트 수신
    * localStorage에서 API 키와 페르소나 설정 읽어 전달
    */
+  /** 토론 강제 정지 - AbortController로 SSE fetch 스트림 중단 */
+  function stopDebate() {
+    abortControllerRef.current?.abort();
+  }
+
   async function runDebate() {
     setRunning(true);
     setRunError("");
     setStreamingMessages([]);
     setCurrentStreamIndex(-1);
+    // 새 AbortController 생성 - 정지 버튼 클릭 시 이걸 abort()
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     // 설정 페이지에서 저장한 API 키 및 페르소나 읽기
     const savedApiKey = localStorage.getItem(STORAGE_KEY_API) || undefined;
@@ -141,8 +157,9 @@ export default function SessionDetailPage() {
       const response = await fetch(`/api/sessions/${id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // localStorage에서 읽은 API 키와 페르소나를 서버에 전달
         body: JSON.stringify({ apiKey: savedApiKey, personas }),
+        // AbortController signal 연결 - 정지 시 fetch 연결 끊김
+        signal: controller.signal,
       });
 
       if (!response.body) throw new Error("스트림을 받을 수 없습니다.");
@@ -173,8 +190,13 @@ export default function SessionDetailPage() {
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "연결 오류가 발생했습니다.";
-      setRunError(message);
+      // AbortError는 사용자가 정지 버튼을 누른 것 - 오류 메시지 표시 안 함
+      if (err instanceof Error && err.name === "AbortError") {
+        setRunError("");
+      } else {
+        const message = err instanceof Error ? err.message : "연결 오류가 발생했습니다.";
+        setRunError(message);
+      }
     } finally {
       // 토론 완료 후 DB에서 최신 데이터 로드
       await fetchSession();
@@ -359,6 +381,15 @@ export default function SessionDetailPage() {
         <Link href="/projects" className="text-gray-500 hover:text-gray-400 text-sm">← 프로젝트로</Link>
         <div className="flex items-center gap-3 mt-2">
           <h1 className="text-2xl font-bold text-white flex-1">{session.title}</h1>
+          {/* 진행 중일 때 정지 버튼 표시 */}
+          {running && (
+            <button
+              onClick={stopDebate}
+              className="px-4 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 text-sm font-medium transition flex items-center gap-2"
+            >
+              ⏹ 정지
+            </button>
+          )}
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
             isCompleted ? "bg-green-500/20 text-green-400" :
             isFailed ? "bg-red-500/20 text-red-400" :
