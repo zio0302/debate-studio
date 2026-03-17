@@ -10,8 +10,8 @@ type Params = { params: Promise<{ id: string }> };
 
 const createSessionSchema = z.object({
   title: z.string().min(1).max(200),
-  rawInput: z.string().min(10).max(10000),
-  additionalConstraints: z.string().max(2000).optional(),
+  rawInput: z.string().min(10).max(50000),             // 기획안은 충분히 긴 텍스트 허용
+  additionalConstraints: z.string().max(5000).optional(), // 추가 조건도 여유 있게
   rounds: z.number().int().min(1).max(4).default(2),
   outputTone: z.enum(["concise", "standard", "detailed"]).default("standard"),
 });
