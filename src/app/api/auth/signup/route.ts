@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
     if (!parsed.success) {
       return NextResponse.json(
-        { success: false, data: null, error: parsed.error.errors[0].message },
+        { success: false, data: null, error: parsed.error.issues[0].message },
         { status: 400 }
       );
     }
