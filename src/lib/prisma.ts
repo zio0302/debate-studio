@@ -19,8 +19,10 @@ const globalForDb = globalThis as unknown as {
 const client =
   globalForDb.client ??
   postgres(process.env.DATABASE_URL, {
-    max: 1,
-    prepare: false, // Supabase Transaction Pooler 필수 설정
+    max: 5,              // 동시 쿼리 처리를 위해 연결 풀 확대 (1→5)
+    prepare: false,      // Supabase Transaction Pooler 필수 설정
+    idle_timeout: 20,    // 미사용 연결 20초 후 자동 해제
+    connect_timeout: 10, // 연결 대기 최대 10초
   });
 
 export const db =

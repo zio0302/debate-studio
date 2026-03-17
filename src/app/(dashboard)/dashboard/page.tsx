@@ -5,6 +5,9 @@ import { projects, sessions, finalSummaries } from "@/lib/schema";
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import Link from "next/link";
 
+// 30초 캐시: 매번 DB를 조회하지 않고 ISR로 빠르게 응답
+export const revalidate = 30;
+
 export default async function DashboardPage() {
   const session = await auth();
   const userId = session!.user!.id!;

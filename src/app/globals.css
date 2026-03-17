@@ -33,11 +33,13 @@ body {
   border-radius: 3px;
 }
 
-/* 미묘한 글래스모피즘 효과 */
+/* 글래스모피즘 - 성능 최적화 (blur 경량화 + GPU 가속 힌트) */
 .glass {
   background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  will-change: transform;
 }
 
 /* 텍스트 그라데이션 */
@@ -48,12 +50,13 @@ body {
   background-clip: text;
 }
 
-/* 카드 호버 효과 */
+/* 카드 호버 - GPU 가속으로 부드러운 전환 */
 .card-hover {
-  transition: all 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  will-change: transform;
 }
 .card-hover:hover {
-  transform: translateY(-2px);
+  transform: translateY(-2px) translateZ(0);
   box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
 }
 
