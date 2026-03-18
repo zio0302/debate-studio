@@ -74,9 +74,9 @@ body {
   background: rgba(168, 85, 247, 0.05);
 }
 
-/* 메시지 본문 스크롤 - overflow: clip 경고 무력화용 !important */
+/* 메시지 본문 스크롤 - scroll로 강제해서 항상 스크롤바 표시 */
 .message-body {
-  max-height: 18rem !important;
-  overflow-y: auto !important;
+  height: 18rem !important;
+  overflow-y: scroll !important;
   overflow-x: hidden;
 }

@@ -642,7 +642,7 @@ export default function SessionDetailPage() {
                 {(msg.content || isCurrentlySteaming) && (
                   <div
                     className="message-body px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
-                    style={{ maxHeight: "18rem", overflowY: "auto" }}
+                    style={{ height: "18rem", overflowY: "scroll" }}
                   >
                     {msg.content}
                     {/* 커서: 현재 타이핑 중일 때만 표시 */}
@@ -687,7 +687,7 @@ export default function SessionDetailPage() {
                 {!isCollapsed && (
                   <div
                     className="message-body px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
-                    style={{ maxHeight: "18rem", overflowY: "auto" }}
+                    style={{ height: "18rem", overflowY: "scroll" }}
                   >
                     {msg.content}
                   </div>
