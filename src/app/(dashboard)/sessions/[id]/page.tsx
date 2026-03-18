@@ -55,6 +55,46 @@ interface ChatMessage {
   isStreaming?: boolean;
 }
 
+// ─── 어몽어스 크루메이트 SVG 컴포넌트 ────────────────────
+// 각 페르소나를 귀여운 어몽어스 캐릭터로 표현
+const CREWMATE_COLORS: Record<string, string> = {
+  persona_a: "#ff4455",  // 빨강
+  persona_b: "#4488ff",  // 파랑
+  persona_c: "#44cc66",  // 초록
+  persona_d: "#ffaa00",  // 노랑
+  moderator: "#aa44ff",  // 보라
+};
+
+function Crewmate({ roleType, size = 48, isSpeaking = false }: { roleType: string; size?: number; isSpeaking?: boolean }) {
+  const color = CREWMATE_COLORS[roleType] ?? "#888";
+  const visorColor = "#aadefc";
+  const darkColor = color + "bb"; // 다리/팩 약간 어둡게
+  return (
+    <svg
+      width={size}
+      height={size * 1.25}
+      viewBox="0 0 40 50"
+      fill="none"
+      style={isSpeaking ? { filter: `drop-shadow(0 0 6px ${color}88)` } : {}}
+    >
+      {/* 몸통 */}
+      <ellipse cx="20" cy="34" rx="13" ry="13" fill={color} />
+      {/* 머리 */}
+      <ellipse cx="20" cy="17" rx="12" ry="11" fill={color} />
+      {/* 바이저(유리) */}
+      <ellipse cx="21" cy="14" rx="7.5" ry="6" fill={visorColor} opacity="0.92" />
+      {/* 바이저 하이라이트 */}
+      <ellipse cx="18" cy="12" rx="2.5" ry="1.8" fill="white" opacity="0.5" />
+      {/* 백팩 */}
+      <rect x="31" y="26" width="6" height="10" rx="3" fill={darkColor} />
+      {/* 왼쪽 다리 */}
+      <rect x="13" y="44" width="6" height="5" rx="2.5" fill={darkColor} />
+      {/* 오른쪽 다리 */}
+      <rect x="21" y="44" width="6" height="5" rx="2.5" fill={darkColor} />
+    </svg>
+  );
+}
+
 // ─── 스타일 상수 ─────────────────────────────────
 
 const ROLE_STYLES: Record<string, { border: string; badge: string; icon: string }> = {
@@ -82,6 +122,8 @@ export default function SessionDetailPage() {
   const [copied, setCopied] = useState(false);
   // 접힌/펼쳙 상태 (message id Set)
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
+  // 기획 원문 접기/펼치기 (기본 접힘)
+  const [isRawInputOpen, setIsRawInputOpen] = useState(false);
 
   // Moderator 채팅 상태
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -381,15 +423,6 @@ export default function SessionDetailPage() {
         <Link href="/projects" className="text-gray-500 hover:text-gray-400 text-sm">← 프로젝트로</Link>
         <div className="flex items-center gap-3 mt-2">
           <h1 className="text-2xl font-bold text-white flex-1">{session.title}</h1>
-          {/* 진행 중일 때 정지 버튼 표시 */}
-          {running && (
-            <button
-              onClick={stopDebate}
-              className="px-4 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 text-sm font-medium transition flex items-center gap-2"
-            >
-              ⏹ 정지
-            </button>
-          )}
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
             isCompleted ? "bg-green-500/20 text-green-400" :
             isFailed ? "bg-red-500/20 text-red-400" :
@@ -427,16 +460,24 @@ export default function SessionDetailPage() {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-white">토론 로그</h2>
 
-          {/* 원문 기획안 */}
-          <div className="glass rounded-2xl p-5 border border-white/10">
-            <div className="flex items-center gap-2 mb-3">
+          {/* 원문 기획안 - 기본 접힘, 클릭으로 토글 */}
+          <div className="glass rounded-2xl border border-white/10">
+            <div
+              className="flex items-center gap-2 p-4 cursor-pointer select-none"
+              onClick={() => setIsRawInputOpen(v => !v)}
+            >
               <span className="text-sm font-medium text-gray-400">📝 기획 원문</span>
+              <span className="ml-auto text-gray-600 text-xs">{isRawInputOpen ? "▲ 접기" : "▼ 펼치기"}</span>
             </div>
-            <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{session.rawInput}</p>
-            {session.additionalConstraints && (
-              <div className="mt-3 pt-3 border-t border-white/10">
-                <p className="text-xs text-gray-500 mb-1">추가 조건</p>
-                <p className="text-gray-400 text-sm">{session.additionalConstraints}</p>
+            {isRawInputOpen && (
+              <div className="px-5 pb-5">
+                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{session.rawInput}</p>
+                {session.additionalConstraints && (
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <p className="text-xs text-gray-500 mb-1">추가 조건</p>
+                    <p className="text-gray-400 text-sm">{session.additionalConstraints}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -446,7 +487,16 @@ export default function SessionDetailPage() {
           ─────────────────────────────────────────────────────────────── */}
           {running && (
             <div className="glass rounded-2xl p-6 border border-indigo-500/20">
-              <p className="text-xs text-gray-500 text-center mb-5">🪑 토론 테이블</p>
+              {/* 테이블 헤더 + 정지버튼 */}
+              <div className="flex items-center justify-between mb-5">
+                <p className="text-xs text-gray-500">🪑 토론 테이블</p>
+                <button
+                  onClick={stopDebate}
+                  className="px-3 py-1 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 text-xs font-medium transition"
+                >
+                  ⏹ 토론 정지
+                </button>
+              </div>
               {/* 캐릭터 배치: 위 2개 / 아래 2개 + 중재자 중앙 */}
               <div className="relative flex flex-col items-center gap-4">
                 {/* 위쪽 페르소나 행 */}
