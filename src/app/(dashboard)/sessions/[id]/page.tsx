@@ -441,13 +441,131 @@ export default function SessionDetailPage() {
             )}
           </div>
 
-          {/* 토론 진행 중: 스트리밍 메시지 */}
+          {/* ───────────────────────────────────────────────────────────
+              토론 테이블: 발언 중인 캐릭터 시각화 (토론 진행 중에만 표시)
+          ─────────────────────────────────────────────────────────────── */}
+          {running && (
+            <div className="glass rounded-2xl p-6 border border-indigo-500/20">
+              <p className="text-xs text-gray-500 text-center mb-5">🪑 토론 테이블</p>
+              {/* 캐릭터 배치: 위 2개 / 아래 2개 + 중재자 중앙 */}
+              <div className="relative flex flex-col items-center gap-4">
+                {/* 위쪽 페르소나 행 */}
+                <div className="flex gap-10 justify-center">
+                  {streamingMessages
+                    .filter((_, i) => i % 4 === 0 || i % 4 === 1)
+                    .slice(0, 2)
+                    .map((_, slotIdx) => {
+                      const allPersonaSpeakers = [...new Set(streamingMessages.filter(m => m.roleType !== "moderator").map(m => m.speaker))];
+                      const speaker = allPersonaSpeakers[slotIdx];
+                      const msg = streamingMessages.find(m => m.speaker === speaker);
+                      const isSpeaking = msg ? streamingMessages.indexOf(msg) === currentStreamIndex && !msg?.isDone : false;
+                      const hasDone = msg?.isDone ?? false;
+                      const style = msg ? (ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a) : ROLE_STYLES.persona_a;
+                      const snippet = msg?.content?.replace(/\n/g, " ").substring(0, 30) ?? "";
+                      return (
+                        <div key={slotIdx} className="flex flex-col items-center gap-1.5 w-24">
+                          {/* 말풍선 */}
+                          {isSpeaking && snippet && (
+                            <div className="bg-white/10 backdrop-blur rounded-xl px-2.5 py-1.5 text-[10px] text-gray-300 max-w-[96px] text-center leading-tight animate-fade-in">
+                              {snippet}...
+                            </div>
+                          )}
+                          {/* 캐릭터 아이콘 */}
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl border-2 transition-all duration-300 shadow-lg ${
+                            isSpeaking
+                              ? "border-indigo-400 scale-110 animate-bounce bg-indigo-500/20"
+                              : hasDone
+                              ? "border-white/20 opacity-70 bg-white/5"
+                              : "border-white/10 opacity-40 bg-white/5"
+                          }`} style={isSpeaking ? { animation: "bounce 0.6s infinite" } : {}}>
+                            {style.icon}
+                          </div>
+                          {/* 이름 */}
+                          <span className={`text-[10px] text-center leading-tight ${
+                            isSpeaking ? "text-indigo-300 font-medium" : "text-gray-600"
+                          }`}>{speaker ?? "..."}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+                {/* 중재자 (중앙) */}
+                {(() => {
+                  const modMsg = streamingMessages.find(m => m.roleType === "moderator");
+                  const isSpeakingMod = modMsg ? streamingMessages.indexOf(modMsg) === currentStreamIndex && !modMsg.isDone : false;
+                  const hasDoneMod = modMsg?.isDone ?? false;
+                  const snippet = modMsg?.content?.replace(/\n/g, " ").substring(0, 30) ?? "";
+                  return (
+                    <div className="flex flex-col items-center gap-1.5">
+                      {isSpeakingMod && snippet && (
+                        <div className="bg-purple-500/20 backdrop-blur rounded-xl px-2.5 py-1.5 text-[10px] text-purple-300 max-w-[120px] text-center leading-tight">
+                          {snippet}...
+                        </div>
+                      )}
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl border-2 transition-all duration-300 shadow-lg ${
+                        isSpeakingMod
+                          ? "border-purple-400 scale-110 bg-purple-500/20"
+                          : hasDoneMod
+                          ? "border-white/20 opacity-70 bg-white/5"
+                          : "border-white/10 opacity-40 bg-white/5"
+                      }`}>
+                        ⚖️
+                      </div>
+                      <span className={`text-[10px] ${
+                        isSpeakingMod ? "text-purple-300 font-medium" : "text-gray-600"
+                      }`}>중재자</span>
+                    </div>
+                  );
+                })()}
+                {/* 아래쪽 페르소나 행 */}
+                <div className="flex gap-10 justify-center">
+                  {streamingMessages
+                    .filter((_, i) => i % 4 === 2 || i % 4 === 3)
+                    .slice(0, 2)
+                    .map((_, slotIdx) => {
+                      const allPersonaSpeakers = [...new Set(streamingMessages.filter(m => m.roleType !== "moderator").map(m => m.speaker))];
+                      const speaker = allPersonaSpeakers[slotIdx + 2];
+                      const msg = streamingMessages.find(m => m.speaker === speaker);
+                      const isSpeaking = msg ? streamingMessages.indexOf(msg) === currentStreamIndex && !msg?.isDone : false;
+                      const hasDone = msg?.isDone ?? false;
+                      const style = msg ? (ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a) : ROLE_STYLES.persona_a;
+                      const snippet = msg?.content?.replace(/\n/g, " ").substring(0, 30) ?? "";
+                      return (
+                        <div key={slotIdx} className="flex flex-col items-center gap-1.5 w-24">
+                          {isSpeaking && snippet && (
+                            <div className="bg-white/10 backdrop-blur rounded-xl px-2.5 py-1.5 text-[10px] text-gray-300 max-w-[96px] text-center leading-tight">
+                              {snippet}...
+                            </div>
+                          )}
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl border-2 transition-all duration-300 shadow-lg ${
+                            isSpeaking
+                              ? "border-indigo-400 scale-110 bg-indigo-500/20"
+                              : hasDone
+                              ? "border-white/20 opacity-70 bg-white/5"
+                              : "border-white/10 opacity-40 bg-white/5"
+                          }`}>
+                            {style.icon}
+                          </div>
+                          <span className={`text-[10px] text-center leading-tight ${
+                            isSpeaking ? "text-indigo-300 font-medium" : "text-gray-600"
+                          }`}>{speaker ?? "..."}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 스트리밍 메시지 로그: 완료된 발언은 접힘, 현재 발언 중인 것만 열림 */}
           {running && streamingMessages.map((msg, idx) => {
             const style = ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a;
             const isCurrentlySteaming = idx === currentStreamIndex && !msg.isDone;
+            // 완료된 메시지는 접힘, 현재 발언 중인 것만 열림
+            const isOpen = isCurrentlySteaming;
             return (
-              <div key={idx} className={`glass rounded-2xl p-5 border ${style.border} transition-all`}>
-                <div className="flex items-center gap-2 mb-3">
+              <div key={idx} className={`glass rounded-2xl border ${style.border} transition-all`}>
+                {/* 헤더 - 항상 표시 */}
+                <div className="flex items-center gap-2 p-4">
                   <span>{style.icon}</span>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${style.badge}`}>
                     {msg.speaker}
@@ -455,6 +573,7 @@ export default function SessionDetailPage() {
                   {msg.roundNo > 0 && (
                     <span className="text-xs text-gray-600">Round {msg.roundNo}</span>
                   )}
+                  {/* 현재 발언 중: 도트 애니메이션 */}
                   {isCurrentlySteaming && (
                     <span className="flex gap-0.5 ml-auto">
                       {[0, 1, 2].map((i) => (
@@ -463,14 +582,18 @@ export default function SessionDetailPage() {
                       ))}
                     </span>
                   )}
-                </div>
-                <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-                  {msg.content}
-                  {/* 커서 깜빡임 효과 */}
-                  {isCurrentlySteaming && (
-                    <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse align-middle" />
+                  {/* 완료된 발언: 완료 표시 */}
+                  {msg.isDone && (
+                    <span className="ml-auto text-gray-600 text-xs">✓ 완료</span>
                   )}
                 </div>
+                {/* 본문 - 현재 발언 중일 때만 표시 */}
+                {isOpen && (
+                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
+                    <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse align-middle" />
+                  </div>
+                )}
               </div>
             );
           })}
