@@ -36,11 +36,11 @@ export interface SseEventData {
   error: { message: string };
 }
 
-// send 함수 타입 - route.ts에서 구현해서 넘겨줌
+// send 함수 타입 - route.ts에서 구현해서 넘겨줌 (async: 청크가 실제 전송될 때까지 대기)
 export type SseSender = <T extends SseEventType>(
   type: T,
   data: SseEventData[T]
-) => void;
+) => Promise<void>;
 
 // 메시지 저장 헬퍼
 async function saveMessage(params: {
@@ -131,7 +131,7 @@ export async function runDebateSessionStream(
         });
 
         // 발언 시작 이벤트 - 클라이언트에서 새 말풍선 생성
-        send("start", {
+        await send("start", {
           speaker: persona.name,
           roundNo: round,
           roleType: `persona_${persona.id}`,
@@ -160,7 +160,7 @@ export async function runDebateSessionStream(
           tokenUsageOutput: response.tokenUsageOutput,
         });
 
-        send("message_done", {
+        await send("message_done", {
           speaker: persona.name,
           roundNo: round,
           content: response.content,
@@ -184,7 +184,7 @@ export async function runDebateSessionStream(
     });
 
     // Moderator도 스트리밍으로 실행
-    send("start", {
+    await send("start", {
       speaker: "Moderator",
       roundNo: 0,
       roleType: "moderator",

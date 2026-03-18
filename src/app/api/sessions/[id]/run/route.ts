@@ -68,11 +68,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   const encoder = new TextEncoder();
 
   // SSE 이벤트 전송 헬퍼 - "data: {json}\n\n" 형식이 SSE 표준
-  const send: SseSender = (type, data) => {
+  // async로 선언하여 writer.write가 완료될 때까지 대기 → Vercel 버퍼링 방지
+  const send: SseSender = async (type, data) => {
     const payload = JSON.stringify({ type, data });
-    // writer.write는 Promise이지만 비동기 처리 없이 fire-and-forget
-    // (스트림 내부 버퍼가 관리하므로 순서 보장됨)
-    writer.write(encoder.encode(`data: ${payload}\n\n`)).catch(console.error);
+    await writer.write(encoder.encode(`data: ${payload}\n\n`));
   };
 
   // 오케스트레이터를 백그라운드로 실행 (await 없이)

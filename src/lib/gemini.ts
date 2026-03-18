@@ -177,7 +177,7 @@ export async function callGeminiStream(
   systemPrompt: string,
   userMessage: string,
   apiKey: string | undefined,
-  onChunk: (text: string) => void,
+  onChunk: (text: string) => Promise<void> | void,
   _modelName?: string
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
@@ -209,7 +209,7 @@ export async function callGeminiStream(
           try {
             const chunk = JSON.parse(s);
             const text: string = chunk.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-            if (text) { fullContent += text; onChunk(text); }
+            if (text) { fullContent += text; await onChunk(text); }
             if (chunk.usageMetadata) {
               inputTokens  = chunk.usageMetadata.promptTokenCount     ?? 0;
               outputTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
