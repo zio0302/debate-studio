@@ -458,6 +458,23 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* 실행 중단됨 - 리셋 후 재시작 버튼 */}
+      {session.status === "running" && !running && (
+        <div className="glass rounded-2xl p-6 text-center border border-orange-500/20">
+          <p className="text-orange-300 mb-2">⚠️ 이전 실행이 중단된 것 같습니다.</p>
+          <p className="text-gray-400 text-sm mb-4">세션을 초기화하고 다시 시작할 수 있습니다.</p>
+          <button
+            onClick={async () => {
+              await fetch(`/api/sessions/${id}/reset`, { method: "POST" });
+              await fetchSession();
+            }}
+            className="px-6 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-medium transition"
+          >
+            🔄 초기화 후 재시작
+          </button>
+        </div>
+      )}
+
       {/* ─── 토론 메시지 (실시간 스트리밍 OR 완료 후 DB 로드) ─── */}
       {(displayMessages.length > 0 || session.messages.length > 0) && (
         <div className="space-y-4">
