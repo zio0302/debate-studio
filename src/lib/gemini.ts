@@ -21,13 +21,14 @@ const API_VERSIONS = ["v1beta", "v1"];
 const BLOCKED_FOR_NEW_USERS = ["gemini-2.0-flash", "gemini-2.0-flash-lite"];
 
 // 선호 모델 키워드 (이 순서대로 ListModels 결과에서 매칭)
+// ⚠️ 비용 절감: Flash 계열을 우선 선택, Pro는 뒤로 (Pro는 Flash 대비 10~20배 비쌈)
 const PREFERRED_KEYWORDS = [
-  "gemini-2.5-pro",
-  "gemini-2.0-flash-exp",
-  "gemini-2.0-flash-thinking",
-  "gemini-1.5-flash-8b",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
+  "gemini-2.0-flash-exp",       // Flash Exp - 무료/저렴
+  "gemini-2.0-flash-thinking",  // Flash Thinking - 저렴
+  "gemini-1.5-flash",           // 가장 안정적인 Flash
+  "gemini-1.5-flash-8b",        // Flash 경량
+  "gemini-1.5-pro",             // Pro - 필요 시
+  "gemini-2.5-pro",             // 2.5 Pro - 매우 비쌈, 마지막 수단
   "gemini-1.0-pro",
   "gemini-pro",
 ];
@@ -141,12 +142,24 @@ export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string,
-  _modelName?: string
+  modelName?: string  // 사용자가 설정에서 선택한 모델
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, apiVersion } = await detectModel(key);
+  // 사용자가 모델을 직접 선택했으면 그걸 쓰고, 없으면 자동 탐지
+  let model: string;
+  let apiVersion: string;
+  if (modelName) {
+    model = modelName;
+    apiVersion = "v1beta"; // 선택한 모델은 항상 v1beta로 시도
+    console.log(`[Gemini] ✅ 사용자 선택 모델 사용: ${model}`);
+  } else {
+    const detected = await detectModel(key);
+    model = detected.model;
+    apiVersion = detected.apiVersion;
+  }
+
   const url  = `${BASE}/${apiVersion}/models/${model}:generateContent?key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
@@ -178,12 +191,24 @@ export async function callGeminiStream(
   userMessage: string,
   apiKey: string | undefined,
   onChunk: (text: string) => Promise<void> | void,
-  _modelName?: string
+  modelName?: string  // 사용자가 설정에서 선택한 모델
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, apiVersion } = await detectModel(key);
+  // 사용자가 모델을 직접 선택했으면 그걸 쓰고, 없으면 자동 탐지
+  let model: string;
+  let apiVersion: string;
+  if (modelName) {
+    model = modelName;
+    apiVersion = "v1beta";
+    console.log(`[Gemini] ✅ 사용자 선택 모델 사용: ${model}`);
+  } else {
+    const detected = await detectModel(key);
+    model = detected.model;
+    apiVersion = detected.apiVersion;
+  }
+
   const url  = `${BASE}/${apiVersion}/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
