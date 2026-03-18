@@ -608,12 +608,10 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {/* 스트리밍 메시지 로그: 완료된 발언은 접힘, 현재 발언 중인 것만 열림 */}
+          {/* 스트리밍 메시지 로그: 모든 발언이 실시간으로 쭉 표시 */}
           {running && streamingMessages.map((msg, idx) => {
             const style = ROLE_STYLES[msg.roleType] ?? ROLE_STYLES.persona_a;
             const isCurrentlySteaming = idx === currentStreamIndex && !msg.isDone;
-            // 완료된 메시지는 접힘, 현재 발언 중인 것만 열림
-            const isOpen = isCurrentlySteaming;
             return (
               <div key={idx} className={`glass rounded-2xl border ${style.border} transition-all`}>
                 {/* 헤더 - 항상 표시 */}
@@ -639,11 +637,14 @@ export default function SessionDetailPage() {
                     <span className="ml-auto text-gray-600 text-xs">✓ 완료</span>
                   )}
                 </div>
-                {/* 본문 - 현재 발언 중일 때만 표시, 고정 높이+스크롤 */}
-                {isOpen && (
-                  <div className="px-5 pb-5 max-h-64 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                {/* 본문 - 항상 표시 (내용이 있을 때) */}
+                {(msg.content || isCurrentlySteaming) && (
+                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.content}
-                    <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse align-middle" />
+                    {/* 커서: 현재 타이핑 중일 때만 표시 */}
+                    {isCurrentlySteaming && (
+                      <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse align-middle" />
+                    )}
                   </div>
                 )}
               </div>
@@ -678,9 +679,9 @@ export default function SessionDetailPage() {
                     )}
                   </span>
                 </div>
-                {/* 펼침 시: 고정 높이 + 스크롤 */}
+                {/* 펼침 시: 내용 전체 표시 (짤림 없음) */}
                 {!isCollapsed && (
-                  <div className="px-5 pb-5 max-h-72 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.content}
                   </div>
                 )}
