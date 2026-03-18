@@ -42,7 +42,7 @@ export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string,
-  modelName: string = "gemini-2.0-flash"
+  modelName: string = "gemini-2.0-flash-lite"
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
@@ -90,7 +90,7 @@ export async function callGeminiStream(
   userMessage: string,
   apiKey: string | undefined,
   onChunk: (text: string) => void,
-  modelName: string = "gemini-2.0-flash"
+  modelName: string = "gemini-2.0-flash-lite"
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
