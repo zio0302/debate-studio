@@ -1,8 +1,10 @@
 /**
  * Gemini REST API 직접 호출 유틸리티
  * ─────────────────────────────────────────────────────────────
- * 모델/버전 조합을 순서대로 시도해 첫 번째 동작하는 것을 캐시합니다.
- * 실패 시 실제 Google 에러 메시지를 그대로 사용자에게 전달합니다.
+ * 핵심 전략:
+ * 1. ListModels API로 이 API 키에서 실제 사용 가능한 모델 목록을 조회
+ * 2. 선호 모델 순서대로 매칭되는 첫 번째 모델 선택 (신규키 제한 모델 제외)
+ * 3. 선택된 모델로 generateContent 호출
  * ─────────────────────────────────────────────────────────────
  */
 
@@ -13,76 +15,89 @@ export interface GeminiResponse {
 }
 
 const BASE = "https://generativelanguage.googleapis.com";
+const API_VERSIONS = ["v1beta", "v1"];
 
-interface Candidate { model: string; apiVersion: string; }
+// 신규 키에서 generateContent가 막힌 모델들 (ListModels엔 나오나 실제 호출 불가)
+const BLOCKED_FOR_NEW_USERS = ["gemini-2.0-flash", "gemini-2.0-flash-lite"];
 
-/**
- * 신규 계정 우선 순위 (Google의 신규 키 정책 반영):
- * - gemini-2.5-pro 계열: 신규 키에서 권장
- * - gemini-2.0-flash-exp: 실험적이지만 신규 키 허용
- * - gemini-1.5-flash 계열: v1 엔드포인트
- * - gemini-1.0-pro / gemini-pro: 가장 구형, 폴백
- */
-const CANDIDATES: Candidate[] = [
-  { model: "gemini-2.5-pro-exp-03-25",          apiVersion: "v1beta" },
-  { model: "gemini-2.5-pro-preview-03-25",       apiVersion: "v1beta" },
-  { model: "gemini-2.0-flash-exp",               apiVersion: "v1beta" },
-  { model: "gemini-2.0-flash-thinking-exp-01-21",apiVersion: "v1beta" },
-  { model: "gemini-1.5-flash",                   apiVersion: "v1"     },
-  { model: "gemini-1.5-flash-latest",            apiVersion: "v1"     },
-  { model: "gemini-1.5-flash-002",               apiVersion: "v1"     },
-  { model: "gemini-1.5-flash-001",               apiVersion: "v1"     },
-  { model: "gemini-1.5-pro",                     apiVersion: "v1"     },
-  { model: "gemini-1.5-pro-latest",              apiVersion: "v1"     },
-  { model: "gemini-1.5-flash",                   apiVersion: "v1beta" },
-  { model: "gemini-1.5-pro",                     apiVersion: "v1beta" },
-  { model: "gemini-1.0-pro",                     apiVersion: "v1beta" },
-  { model: "gemini-pro",                         apiVersion: "v1beta" },
+// 선호 모델 키워드 (이 순서대로 ListModels 결과에서 매칭)
+const PREFERRED_KEYWORDS = [
+  "gemini-2.5-pro",
+  "gemini-2.0-flash-exp",
+  "gemini-2.0-flash-thinking",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-1.0-pro",
+  "gemini-pro",
 ];
 
 // ─── 캐시 ─────────────────────────────────────────────────────
-let _cachedCandidate: Candidate | null = null;
+interface ModelConfig { model: string; apiVersion: string; }
+let _cached: ModelConfig | null = null;
 let _cachedKey: string | null = null;
 
 /**
- * GET /models/{model} 로 모델 존재 여부를 확인합니다.
- * POST generateContent 보다 훨씬 가볍고 안정적입니다.
+ * ListModels API로 실제 사용 가능한 모델을 조회해 최적 모델을 선택합니다.
+ * 결과는 API 키가 동일하면 캐시를 재사용합니다.
  */
-async function findWorkingCandidate(key: string): Promise<Candidate> {
-  if (_cachedKey === key && _cachedCandidate) return _cachedCandidate;
+async function detectModel(key: string): Promise<ModelConfig> {
+  if (_cachedKey === key && _cached) return _cached;
 
-  const errors: string[] = [];
-
-  for (const candidate of CANDIDATES) {
-    const infoUrl = `${BASE}/${candidate.apiVersion}/models/${candidate.model}?key=${key}`;
+  for (const apiVersion of API_VERSIONS) {
     try {
-      const res = await fetch(infoUrl);
-      const body = await res.text();
-
-      if (res.ok) {
-        // 모델 정보 조회 성공 → 사용 가능
-        console.log(`[Gemini] ✅ 사용 가능: ${candidate.model} (${candidate.apiVersion})`);
-        _cachedKey = key;
-        _cachedCandidate = candidate;
-        return candidate;
+      const res = await fetch(`${BASE}/${apiVersion}/models?key=${key}`);
+      if (!res.ok) {
+        const errBody = await res.text();
+        console.warn(`[Gemini] ListModels ${apiVersion} 실패 [${res.status}]: ${errBody.slice(0, 200)}`);
+        continue;
       }
 
-      // 404: 이 버전/키에서 모델 없음 → 다음 시도
-      // 400/403/401: API 키 문제일 수 있음 → 기록만
-      const preview = body.slice(0, 200);
-      errors.push(`${candidate.model}(${candidate.apiVersion}): [${res.status}] ${preview}`);
-      console.warn(`[Gemini] ❌ ${candidate.model}(${candidate.apiVersion}): ${res.status}`);
+      const json = await res.json();
+      // 응답 형식: { models: [{ name: "models/gemini-1.5-flash", supportedGenerationMethods: [...] }] }
+      const allModels: string[] = (json.models ?? [])
+        .filter((m: { supportedGenerationMethods?: string[] }) =>
+          m.supportedGenerationMethods?.includes("generateContent")
+        )
+        .map((m: { name: string }) => m.name.replace("models/", ""));
+
+      // 신규키 차단 모델 제외
+      const candidates = allModels.filter(
+        (m) => !BLOCKED_FOR_NEW_USERS.some((blocked) => m === blocked)
+      );
+
+      console.log(`[Gemini] ${apiVersion} 사용 가능 모델 목록:`, candidates);
+
+      // 선호 순서대로 매칭
+      for (const keyword of PREFERRED_KEYWORDS) {
+        const found = candidates.find((m) => m.startsWith(keyword));
+        if (found) {
+          const config: ModelConfig = { model: found, apiVersion };
+          _cached = config;
+          _cachedKey = key;
+          console.log(`[Gemini] ✅ 선택된 모델: ${found} (${apiVersion})`);
+          return config;
+        }
+      }
+
+      // 선호 모델 매칭 실패 시 첫 번째 모델 사용
+      if (candidates.length > 0) {
+        const config: ModelConfig = { model: candidates[0], apiVersion };
+        _cached = config;
+        _cachedKey = key;
+        console.log(`[Gemini] ✅ 폴백 모델: ${candidates[0]} (${apiVersion})`);
+        return config;
+      }
 
     } catch (e) {
-      errors.push(`${candidate.model}(${candidate.apiVersion}): 네트워크 오류 - ${e}`);
+      console.warn(`[Gemini] ListModels ${apiVersion} 네트워크 오류:`, e);
     }
   }
 
-  // 모든 후보 실패 → 첫 번째 실제 에러가 가장 유용한 정보
-  const firstError = errors[0] ?? "알 수 없는 오류";
   throw new Error(
-    `Gemini API 호출 실패. 실제 오류:\n${firstError}\n\n` +
-    `API 키가 유효한지, AI Studio(aistudio.google.com)에서 발급한 키인지 확인해주세요.`
+    `이 API 키로 사용 가능한 Gemini 모델을 찾지 못했습니다.\n` +
+    `AI Studio(aistudio.google.com)에서 발급한 키를 사용해주세요.\n` +
+    `설정 페이지에서 API 키를 확인해주세요.`
   );
 }
 
@@ -131,7 +146,7 @@ export async function callGemini(
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, apiVersion } = await findWorkingCandidate(key);
+  const { model, apiVersion } = await detectModel(key);
   const url  = `${BASE}/${apiVersion}/models/${model}:generateContent?key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
@@ -168,7 +183,7 @@ export async function callGeminiStream(
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, apiVersion } = await findWorkingCandidate(key);
+  const { model, apiVersion } = await detectModel(key);
   const url  = `${BASE}/${apiVersion}/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
@@ -178,8 +193,7 @@ export async function callGeminiStream(
       const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
       if (!res.ok) { const t = await res.text(); throw new Error(`[${res.status}] ${t}`); }
 
-      const reader  = res.body!.getReader();
-      const decoder = new TextDecoder();
+      const reader = res.body!.getReader(), decoder = new TextDecoder();
       let fullContent = "", inputTokens = 0, outputTokens = 0, buffer = "";
 
       while (true) {
@@ -190,10 +204,10 @@ export async function callGeminiStream(
         buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr || jsonStr === "[DONE]") continue;
+          const s = line.slice(6).trim();
+          if (!s || s === "[DONE]") continue;
           try {
-            const chunk = JSON.parse(jsonStr);
+            const chunk = JSON.parse(s);
             const text: string = chunk.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
             if (text) { fullContent += text; onChunk(text); }
             if (chunk.usageMetadata) {
