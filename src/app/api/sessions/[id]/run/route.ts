@@ -48,7 +48,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // 클라이언트에서 페르소나 설정과 API 키를 받아옴
-  let body: { personas?: PersonaConfig[]; apiKey?: string } = {};
+  let body: { personas?: PersonaConfig[]; apiKey?: string; modelName?: string; apiVersion?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -57,6 +57,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const personas: PersonaConfig[] = body.personas ?? DEFAULT_PERSONAS;
   const apiKey = body.apiKey || undefined;
+  const modelName = body.modelName || undefined;   // 설정에서 선택한 모델
+  const apiVersion = body.apiVersion || undefined; // 설정에서 선택한 API 버전
 
   // TransformStream으로 SSE 스트림 생성
   // - readable: Response에 전달되어 클라이언트로 전송됨
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   // 오케스트레이터를 백그라운드로 실행 (await 없이)
   // 이렇게 해야 스트림이 먼저 Response로 반환되고, 이후 이벤트들이 순차 전달됨
-  runDebateSessionStream(sessionId, personas, apiKey, send)
+  runDebateSessionStream(sessionId, personas, apiKey, send, modelName, apiVersion)
     .catch((error) => {
       const message = error instanceof Error ? error.message : "AI 토론 실행 중 오류가 발생했습니다.";
       console.error("[API/run] 오류:", error);

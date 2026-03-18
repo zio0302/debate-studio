@@ -86,7 +86,9 @@ export async function runDebateSessionStream(
   sessionId: string,
   personas: PersonaConfig[],
   apiKey: string | undefined,
-  send: SseSender
+  send: SseSender,
+  modelName?: string,   // 설정에서 사용자가 선택한 모델
+  apiVersion?: string   // 선택한 모델의 API 버전 (v1 or v1beta)
 ): Promise<void> {
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
   if (!session) throw new Error(`세션을 찾을 수 없음: ${sessionId}`);

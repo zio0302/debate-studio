@@ -189,17 +189,19 @@ export default function SessionDetailPage() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // 설정 페이지에서 저장한 API 키 및 페르소나 읽기
+    // 설정 페이지에서 저장한 API 키, 페르소나, 모델 읽기
     const savedApiKey = localStorage.getItem(STORAGE_KEY_API) || undefined;
     const savedPersonas = localStorage.getItem(STORAGE_KEY_PERSONAS);
     const personas = savedPersonas ? JSON.parse(savedPersonas) : undefined;
+    const modelName = localStorage.getItem("debate_gemini_model") || undefined;
+    const apiVersion = localStorage.getItem("debate_gemini_version") || undefined;
 
     try {
-      // POST로 personas, apiKey 전달하면서 SSE 스트림 연결
+      // POST로 personas, apiKey, modelName, apiVersion 전달하면서 SSE 스트림 연결
       const response = await fetch(`/api/sessions/${id}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: savedApiKey, personas }),
+        body: JSON.stringify({ apiKey: savedApiKey, personas, modelName, apiVersion }),
         // AbortController signal 연결 - 정지 시 fetch 연결 끊김
         signal: controller.signal,
       });
@@ -637,9 +639,9 @@ export default function SessionDetailPage() {
                     <span className="ml-auto text-gray-600 text-xs">✓ 완료</span>
                   )}
                 </div>
-                {/* 본문 - 현재 발언 중일 때만 표시 */}
+                {/* 본문 - 현재 발언 중일 때만 표시, 고정 높이+스크롤 */}
                 {isOpen && (
-                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div className="px-5 pb-5 max-h-64 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.content}
                     <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 animate-pulse align-middle" />
                   </div>
@@ -676,11 +678,9 @@ export default function SessionDetailPage() {
                     )}
                   </span>
                 </div>
-                {/* 취소 시 요약, 펼치면 전체 */}
-                {isCollapsed ? (
-                  <p className="px-5 pb-4 text-gray-500 text-xs truncate">{preview}...</p>
-                ) : (
-                  <div className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                {/* 펼침 시: 고정 높이 + 스크롤 */}
+                {!isCollapsed && (
+                  <div className="px-5 pb-5 max-h-72 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.content}
                   </div>
                 )}
