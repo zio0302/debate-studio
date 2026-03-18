@@ -1,14 +1,19 @@
-// Gemini API 호출 유틸리티
-// 서버 측에서만 호출되어야 함 (API 키 보안)
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+/**
+ * Gemini REST API 직접 호출 유틸리티
+ * ─────────────────────────────────────────────────────────────
+ * @google/generative-ai SDK는 내부적으로 v1beta 엔드포인트를
+ * 하드코딩해서 신규 API 키에서 404가 발생합니다.
+ * → SDK 없이 fetch로 v1 REST API를 직접 호출해 문제를 근본 해결합니다.
+ *
+ * API endpoint: https://generativelanguage.googleapis.com/v1/models/{model}:generateContent
+ * Streaming:    https://generativelanguage.googleapis.com/v1/models/{model}:streamGenerateContent?alt=sse
+ * ─────────────────────────────────────────────────────────────
+ */
 
-// 안전 설정 (AI 토론 문맥에서 과도한 차단 방지)
-const safetySettings = [
-  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-];
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1/models";
+const DEFAULT_MODEL = "gemini-1.5-flash";
+
+// ─── 타입 정의 ────────────────────────────────────────────────
 
 export interface GeminiResponse {
   content: string;
@@ -16,135 +21,190 @@ export interface GeminiResponse {
   tokenUsageOutput: number;
 }
 
-// 429 오류 메시지에서 "retry in Xs" 초를 파싱하는 헬퍼
-function parseRetryDelay(errorMessage: string): number {
-  const match = errorMessage.match(/retry in (\d+)/i);
-  // 명시된 대기 시간 + 5초 여유 (기본값 65초)
-  return match ? parseInt(match[1], 10) * 1000 + 5000 : 65000;
+/** Gemini REST API 요청 바디 형식 */
+interface GeminiRequestBody {
+  system_instruction?: { parts: [{ text: string }] };
+  contents: { role: string; parts: { text: string }[] }[];
+  generationConfig?: Record<string, unknown>;
+  safetySettings?: { category: string; threshold: string }[];
 }
 
-// 지정한 ms만큼 대기
+// ─── 안전 설정 (과도한 차단 방지) ──────────────────────────────
+
+const SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT",        threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_HATE_SPEECH",       threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+];
+
+// ─── 공통 유틸 ────────────────────────────────────────────────
+
+/** 지정한 ms만큼 대기 */
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-// 429 오류인지 확인
-function isRateLimitError(error: unknown): boolean {
+/** 429 오류 메시지에서 'retry in Xs' 초를 파싱 */
+function parseRetryDelay(msg: string): number {
+  const m = msg.match(/retry in (\d+)/i);
+  return m ? parseInt(m[1], 10) * 1000 + 5000 : 65000;
+}
+
+/** 429 여부 확인 */
+function isRateLimit(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
 }
 
+/** REST API 요청 바디 조립 */
+function buildBody(systemPrompt: string, userMessage: string): GeminiRequestBody {
+  return {
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    safetySettings: SAFETY_SETTINGS,
+  };
+}
+
+// ─── callGemini (일반 / 완성 응답) ────────────────────────────
+
 /**
- * Gemini API를 호출하여 응답을 받아옴 (일반 버전 - 완성된 응답 반환)
- * 429 오류 시 자동으로 1회 재시도 (자동 대기 후)
+ * Gemini에 요청해 완성된 응답 텍스트를 반환합니다.
+ * 429 발생 시 1회 자동 재시도합니다.
  */
 export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string,
-  modelName: string = "gemini-1.5-flash"
+  modelName: string = DEFAULT_MODEL
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
+  if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction: systemPrompt,
-    safetySettings,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-  });
+  const url = `${GEMINI_BASE}/${modelName}:generateContent?key=${key}`;
 
   async function attempt(): Promise<GeminiResponse> {
-    const result = await model.generateContent(userMessage);
-    const response = result.response;
-    const content = response.text();
-    const usageMeta = response.usageMetadata;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildBody(systemPrompt, userMessage)),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`[${res.status}] ${errText}`);
+    }
+
+    const json = await res.json();
+    const content: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const usageMeta = json.usageMetadata ?? {};
+
     return {
       content,
-      tokenUsageInput: usageMeta?.promptTokenCount ?? 0,
-      tokenUsageOutput: usageMeta?.candidatesTokenCount ?? 0,
+      tokenUsageInput:  usageMeta.promptTokenCount     ?? 0,
+      tokenUsageOutput: usageMeta.candidatesTokenCount ?? 0,
     };
   }
 
   try {
     return await attempt();
   } catch (error) {
-    if (isRateLimitError(error)) {
-      const waitMs = parseRetryDelay(error instanceof Error ? error.message : "");
-      console.warn(`[Gemini] 429 Rate Limit - ${waitMs / 1000}초 대기 후 재시도...`);
-      await sleep(waitMs);
-      return await attempt(); // 1회 재시도
+    if (isRateLimit(error)) {
+      const wait = parseRetryDelay(error instanceof Error ? error.message : "");
+      console.warn(`[Gemini] 429 - ${wait / 1000}초 대기 후 재시도`);
+      await sleep(wait);
+      return await attempt();
     }
     throw error;
   }
 }
 
+// ─── callGeminiStream (SSE 스트리밍) ──────────────────────────
+
 /**
- * Gemini API 스트리밍 버전 - 청크 단위로 onChunk 콜백 호출
- * 429 오류 시 지정 대기 후 자동 재시도 (최대 2회)
- * 무료 티어: 분당 15회 제한 → 페르소나 간 딜레이(orchestrator)와 함께 사용
+ * Gemini SSE 스트리밍 버전.
+ * 청크가 올 때마다 onChunk 콜백을 호출합니다.
+ * 429 발생 시 최대 2회 자동 재시도합니다.
  */
 export async function callGeminiStream(
   systemPrompt: string,
   userMessage: string,
   apiKey: string | undefined,
   onChunk: (text: string) => void,
-  modelName: string = "gemini-1.5-flash"
+  modelName: string = DEFAULT_MODEL
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
+  if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction: systemPrompt,
-    safetySettings,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-  });
-
-  // 최대 2번 재시도 (429 대기 포함)
+  const url = `${GEMINI_BASE}/${modelName}:streamGenerateContent?alt=sse&key=${key}`;
   const MAX_RETRIES = 2;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await model.generateContentStream(userMessage);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildBody(systemPrompt, userMessage)),
+      });
 
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`[${res.status}] ${errText}`);
+      }
+
+      // SSE 스트림을 줄 단위로 파싱
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
       let fullContent = "";
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) {
-          fullContent += text;
-          onChunk(text);
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? ""; // 마지막 불완전한 줄은 버퍼에 보관
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr || jsonStr === "[DONE]") continue;
+
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const text: string = chunk.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+            if (text) {
+              fullContent += text;
+              onChunk(text);
+            }
+            // 마지막 청크에 usageMetadata 포함될 수 있음
+            if (chunk.usageMetadata) {
+              inputTokens  = chunk.usageMetadata.promptTokenCount     ?? 0;
+              outputTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
+            }
+          } catch {
+            // JSON 파싱 실패 무시 (불완전한 청크)
+          }
         }
       }
 
-      const finalResponse = await result.response;
-      const usageMeta = finalResponse.usageMetadata;
-      return {
-        content: fullContent,
-        tokenUsageInput: usageMeta?.promptTokenCount ?? 0,
-        tokenUsageOutput: usageMeta?.candidatesTokenCount ?? 0,
-      };
+      return { content: fullContent, tokenUsageInput: inputTokens, tokenUsageOutput: outputTokens };
 
     } catch (error) {
-      const isLastAttempt = attempt === MAX_RETRIES;
-
-      if (isRateLimitError(error) && !isLastAttempt) {
-        // 429: 오류 메시지에서 대기 시간 파싱 후 자동 대기
-        const waitMs = parseRetryDelay(error instanceof Error ? error.message : "");
-        console.warn(`[Gemini Stream] 429 Rate Limit - ${waitMs / 1000}초 대기 후 재시도 (${attempt + 1}/${MAX_RETRIES})...`);
-        // 클라이언트에 대기 중임을 알림 (빈 청크 대신 상태 알림)
-        onChunk(`\n\n⏳ API 요청 한도 초과. ${Math.round(waitMs / 1000)}초 후 자동 재시도합니다...\n\n`);
-        await sleep(waitMs);
-        // 재시도 전 이전에 보낸 임시 메시지 제거를 알림
+      if (isRateLimit(error) && attempt < MAX_RETRIES) {
+        const wait = parseRetryDelay(error instanceof Error ? error.message : "");
+        console.warn(`[Gemini Stream] 429 - ${wait / 1000}초 대기 후 재시도 (${attempt + 1}/${MAX_RETRIES})`);
+        onChunk(`\n\n⏳ API 한도 초과. ${Math.round(wait / 1000)}초 후 자동 재시도합니다...\n\n`);
+        await sleep(wait);
         continue;
       }
-
-      throw error; // 마지막 시도 실패이거나 429가 아닌 오류면 그냥 throw
+      throw error;
     }
   }
 
-  // 여기까지 오면 안 되지만 타입 만족을 위해
   throw new Error("최대 재시도 횟수 초과");
 }
