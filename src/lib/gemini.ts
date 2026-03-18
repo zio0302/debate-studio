@@ -1,12 +1,12 @@
 /**
  * Gemini REST API 직접 호출 유틸리티
  * ─────────────────────────────────────────────────────────────
- * 핵심 전략: 모델명/API 버전을 하드코딩하지 않고,
- * ListModels API로 실제 사용 가능한 모델을 먼저 탐지 후 사용합니다.
+ * 핵심 전략: 여러 모델/엔드포인트 조합을 순서대로 실제 호출 테스트해
+ * 성공하는 첫 번째 조합을 캐시하고 사용합니다.
  *
- * 탐지 순서 (우선순위):
- *   1. v1 엔드포인트 → gemini-2.0-flash, 1.5-flash, 1.5-pro 순
- *   2. v1beta 엔드포인트 → 동일 순서
+ * - gemini-2.0-flash 계열은 신규 API 키에서 ListModels엔 나오지만
+ *   실제 generateContent 호출 시 404 → 명시적으로 제외
+ * - systemInstruction 필드 미사용 (호환성 이슈로 인라인 삽입으로 대체)
  * ─────────────────────────────────────────────────────────────
  */
 
@@ -16,63 +16,65 @@ export interface GeminiResponse {
   tokenUsageOutput: number;
 }
 
-// ─── 모델 탐지 캐시 (API 키가 같으면 재탐지 생략) ─────────────
+// ─── 시도할 모델/엔드포인트 조합 (우선순위 순) ──────────────────
+// gemini-2.0-flash 계열은 신규 키에서 generateContent 호출 시 막히므로 제외
 
-interface ModelConfig { model: string; baseUrl: string; }
-let _cachedConfig: ModelConfig | null = null;
-let _cachedKey: string | null = null;
+interface Candidate { model: string; apiVersion: string; }
 
-/** 선호 모델 목록 (성능 좋은 것부터 순서대로) */
-const PREFERRED_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
-  "gemini-1.5-pro",
-  "gemini-1.0-pro",
-  "gemini-pro",
+const CANDIDATES: Candidate[] = [
+  { model: "gemini-1.5-flash",          apiVersion: "v1"     },
+  { model: "gemini-1.5-flash-latest",   apiVersion: "v1"     },
+  { model: "gemini-1.5-flash-002",      apiVersion: "v1"     },
+  { model: "gemini-1.5-flash-001",      apiVersion: "v1"     },
+  { model: "gemini-1.5-pro",            apiVersion: "v1"     },
+  { model: "gemini-1.5-pro-latest",     apiVersion: "v1"     },
+  { model: "gemini-1.5-flash",          apiVersion: "v1beta" },
+  { model: "gemini-1.5-pro",            apiVersion: "v1beta" },
+  { model: "gemini-1.0-pro",            apiVersion: "v1beta" },
+  { model: "gemini-pro",                apiVersion: "v1beta" },
 ];
 
+const BASE = "https://generativelanguage.googleapis.com";
+
+// ─── 동작 모델 캐시 ───────────────────────────────────────────
+
+let _cachedCandidate: Candidate | null = null;
+let _cachedKey: string | null          = null;
+
 /**
- * API 키로 ListModels를 호출해 사용 가능한 모델 중 최적의 것을 선택합니다.
- * 결과는 API 키가 동일하면 캐시를 재사용합니다.
+ * 실제 generateContent 호출로 동작하는 모델을 탐지합니다.
+ * 한 번 성공하면 API 키가 같을 때 캐시를 재사용합니다.
  */
-async function detectModelConfig(key: string): Promise<ModelConfig> {
-  // 캐시 히트
-  if (_cachedKey === key && _cachedConfig) return _cachedConfig;
+async function findWorkingCandidate(key: string): Promise<Candidate> {
+  if (_cachedKey === key && _cachedCandidate) return _cachedCandidate;
 
-  const versions = ["v1", "v1beta"];
+  // 최소 페이로드로 각 조합 테스트
+  const testBody = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text: "test" }] }],
+    generationConfig: { maxOutputTokens: 1 },
+  });
 
-  for (const version of versions) {
+  for (const candidate of CANDIDATES) {
+    const url = `${BASE}/${candidate.apiVersion}/models/${candidate.model}:generateContent?key=${key}`;
     try {
-      const baseUrl = `https://generativelanguage.googleapis.com/${version}`;
-      const res = await fetch(`${baseUrl}/models?key=${key}`);
-      if (!res.ok) continue;
-
-      const json = await res.json();
-      // API가 반환하는 모델명 형식: "models/gemini-1.5-flash"
-      const available: string[] = (json.models ?? []).map(
-        (m: { name: string }) => m.name.replace("models/", "")
-      );
-
-      // 선호 순서대로 사용 가능한 첫 모델 선택
-      for (const model of PREFERRED_MODELS) {
-        if (available.includes(model)) {
-          const config: ModelConfig = { model, baseUrl };
-          _cachedKey    = key;
-          _cachedConfig = config;
-          console.log(`[Gemini] 탐지된 모델: ${model} (${version})`);
-          return config;
-        }
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: testBody,
+      });
+      // 200 또는 400(파라미터 오류지만 모델은 존재) → 사용 가능
+      if (res.ok || res.status === 400) {
+        console.log(`[Gemini] 사용 가능한 모델 발견: ${candidate.model} (${candidate.apiVersion})`);
+        _cachedKey       = key;
+        _cachedCandidate = candidate;
+        return candidate;
       }
+      // 404 → 다음 조합 시도
     } catch {
-      // 네트워크 오류 → 다음 버전 시도
+      // 네트워크 오류 → 다음 조합 시도
     }
   }
-
-  // ListModels 실패 시 폴백: 가장 일반적인 조합 직접 사용
-  console.warn("[Gemini] ListModels 실패 → 폴백 모델 사용");
-  return { model: "gemini-1.5-flash", baseUrl: "https://generativelanguage.googleapis.com/v1" };
+  throw new Error("사용 가능한 Gemini 모델을 찾지 못했습니다. API 키를 확인해주세요.");
 }
 
 // ─── 공통 유틸 ────────────────────────────────────────────────
@@ -91,7 +93,7 @@ function isRateLimit(error: unknown): boolean {
   return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
 }
 
-/** 시스템 프롬프트를 user message에 인라인 삽입 (systemInstruction 필드 대체) */
+/** 시스템 프롬프트를 user message에 인라인 삽입 */
 function buildBody(systemPrompt: string, userMessage: string) {
   return {
     contents: [
@@ -116,13 +118,13 @@ export async function callGemini(
   systemPrompt: string,
   userMessage: string,
   apiKey?: string,
-  _modelName?: string  // 무시: 자동 탐지로 결정
+  _modelName?: string
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, baseUrl } = await detectModelConfig(key);
-  const url  = `${baseUrl}/models/${model}:generateContent?key=${key}`;
+  const { model, apiVersion } = await findWorkingCandidate(key);
+  const url  = `${BASE}/${apiVersion}/models/${model}:generateContent?key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
   async function attempt(): Promise<GeminiResponse> {
@@ -165,13 +167,13 @@ export async function callGeminiStream(
   userMessage: string,
   apiKey: string | undefined,
   onChunk: (text: string) => void,
-  _modelName?: string  // 무시: 자동 탐지로 결정
+  _modelName?: string
 ): Promise<GeminiResponse> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Gemini API 키가 설정되지 않았습니다.");
 
-  const { model, baseUrl } = await detectModelConfig(key);
-  const url  = `${baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
+  const { model, apiVersion } = await findWorkingCandidate(key);
+  const url  = `${BASE}/${apiVersion}/models/${model}:streamGenerateContent?alt=sse&key=${key}`;
   const body = JSON.stringify(buildBody(systemPrompt, userMessage));
 
   const MAX_RETRIES = 2;
@@ -198,7 +200,6 @@ export async function callGeminiStream(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
@@ -224,7 +225,7 @@ export async function callGeminiStream(
     } catch (error) {
       if (isRateLimit(error) && attempt < MAX_RETRIES) {
         const wait = parseRetryDelay(error instanceof Error ? error.message : "");
-        console.warn(`[Gemini Stream] 429 - ${wait / 1000}초 대기 후 재시도`);
+        console.warn(`[Gemini Stream] 429 - ${wait / 1000}초 대기`);
         onChunk(`\n\n⏳ API 한도 초과. ${Math.round(wait / 1000)}초 후 재시도합니다...\n\n`);
         await sleep(wait);
         continue;
