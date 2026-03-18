@@ -73,3 +73,10 @@ body {
   border-color: rgba(168, 85, 247, 0.4);
   background: rgba(168, 85, 247, 0.05);
 }
+
+/* 메시지 본문 스크롤 - overflow: clip 경고 무력화용 !important */
+.message-body {
+  max-height: 18rem !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+}

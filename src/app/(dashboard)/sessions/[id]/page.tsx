@@ -426,12 +426,13 @@ export default function SessionDetailPage() {
         <div className="flex items-center gap-3 mt-2">
           <h1 className="text-2xl font-bold text-white flex-1">{session.title}</h1>
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+            running ? "bg-yellow-500/20 text-yellow-400 animate-pulse" :
             isCompleted ? "bg-green-500/20 text-green-400" :
             isFailed ? "bg-red-500/20 text-red-400" :
-            running ? "bg-yellow-500/20 text-yellow-400 animate-pulse" :
+            session.status === "running" ? "bg-orange-500/20 text-orange-400" :
             "bg-gray-500/20 text-gray-400"
           }`}>
-            {running ? "🔄 토론 진행 중..." : isCompleted ? "✅ 완료" : isFailed ? "❌ 실패" : "⏳ 대기"}
+            {running ? "🔄 토론 진행 중..." : isCompleted ? "✅ 완료" : isFailed ? "❌ 실패" : session.status === "running" ? "⚠️ 실행 중단됨" : "⏳ 대기"}
           </span>
         </div>
         <p className="text-gray-500 text-sm mt-1">{session.rounds}라운드 · {session.outputTone} 톤</p>
@@ -640,7 +641,7 @@ export default function SessionDetailPage() {
                 {/* 본문 - 항상 표시 (내용이 있을 때), 고정 높이+스크롤 */}
                 {(msg.content || isCurrentlySteaming) && (
                   <div
-                    className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
+                    className="message-body px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
                     style={{ maxHeight: "18rem", overflowY: "auto" }}
                   >
                     {msg.content}
@@ -685,7 +686,7 @@ export default function SessionDetailPage() {
                 {/* 펼침 시: 고정 높이+스크롤 (내용이 길어도 카드 크기 유지) */}
                 {!isCollapsed && (
                   <div
-                    className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
+                    className="message-body px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
                     style={{ maxHeight: "18rem", overflowY: "auto" }}
                   >
                     {msg.content}
