@@ -23,7 +23,7 @@ export interface GeminiResponse {
 
 /** Gemini REST API 요청 바디 형식 */
 interface GeminiRequestBody {
-  system_instruction?: { parts: [{ text: string }] };
+  systemInstruction?: { parts: [{ text: string }] };
   contents: { role: string; parts: { text: string }[] }[];
   generationConfig?: Record<string, unknown>;
   safetySettings?: { category: string; threshold: string }[];
@@ -57,10 +57,13 @@ function isRateLimit(error: unknown): boolean {
   return msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
 }
 
-/** REST API 요청 바디 조립 */
+/** REST API 요청 바디 조립
+ * v1 REST API는 protobuf JSON 규칙 → camelCase 사용
+ */
 function buildBody(systemPrompt: string, userMessage: string): GeminiRequestBody {
   return {
-    system_instruction: { parts: [{ text: systemPrompt }] },
+    // v1 REST API: systemInstruction (camelCase) ← snake_case는 400 오류
+    systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: "user", parts: [{ text: userMessage }] }],
     generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     safetySettings: SAFETY_SETTINGS,
