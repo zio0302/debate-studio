@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import { DEFAULT_PERSONAS } from "@/lib/prompts";
 import type { PersonaConfig } from "@/lib/orchestrator";
 
-const STORAGE_KEY_API = "debate_gemini_api_key";
 const STORAGE_KEY_PERSONAS = "debate_personas";
 
 interface Session {
@@ -27,10 +26,10 @@ interface Project {
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  pending: { label: "대기", cls: "bg-gray-500/20 text-gray-400" },
-  running: { label: "실행 중", cls: "bg-yellow-500/20 text-yellow-400" },
-  completed: { label: "완료", cls: "bg-green-500/20 text-green-400" },
-  failed: { label: "실패", cls: "bg-red-500/20 text-red-400" },
+  pending: { label: "🚀 프롬프트 준비", cls: "bg-indigo-500/20 text-indigo-400" },
+  running: { label: "🚀 프롬프트 준비", cls: "bg-indigo-500/20 text-indigo-400" },
+  completed: { label: "✅ 완료", cls: "bg-green-500/20 text-green-400" },
+  failed: { label: "⚠️ 오류", cls: "bg-red-500/20 text-red-400" },
 };
 
 const PERSONA_COLORS: Record<string, string> = {
@@ -81,12 +80,11 @@ export default function ProjectDetailPage() {
     });
   }
 
-  // 세션 생성 + AI 토론 즉시 실행
+  // 세션 생성 후 세션 페이지로 이동 (AI 자동실행 없음)
   async function handleCreateSession(e: React.FormEvent) {
     e.preventDefault();
     setCreating(true);
 
-    // 1단계: 세션 생성
     const createRes = await fetch(`/api/projects/${id}/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,18 +98,8 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    const sessionId = createData.data.id;
-
-    // 2단계: AI 토론 실행 (페르소나+API키 전달)
-    const apiKey = localStorage.getItem(STORAGE_KEY_API) || undefined;
-    fetch(`/api/sessions/${sessionId}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ personas, apiKey }),
-    }).catch(() => {}); // 비동기 실행 - 결과는 세션 페이지에서 폴링
-
-    // 즉시 세션 결과 페이지로 이동
-    router.push(`/sessions/${sessionId}?running=true`);
+    // 세션 상세 페이지로 이동 (프롬프트 생성 페이지)
+    router.push(`/sessions/${createData.data.id}`);
   }
 
   if (!project) {
@@ -259,7 +247,7 @@ export default function ProjectDetailPage() {
                     세션 생성 중...
                   </>
                 ) : (
-                  `⚡ ${activePersonas.length}명 AI 토론 시작`
+                  `✨ 프롬프트 생성 준비`
                 )}
               </button>
               <button
