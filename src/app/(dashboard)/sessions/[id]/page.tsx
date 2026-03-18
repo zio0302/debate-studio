@@ -639,7 +639,10 @@ export default function SessionDetailPage() {
                 </div>
                 {/* 본문 - 항상 표시 (내용이 있을 때), 고정 높이+스크롤 */}
                 {(msg.content || isCurrentlySteaming) && (
-                  <div className="px-5 pb-5 max-h-72 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div
+                    className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
+                    style={{ maxHeight: "18rem", overflowY: "auto" }}
+                  >
                     {msg.content}
                     {/* 커서: 현재 타이핑 중일 때만 표시 */}
                     {isCurrentlySteaming && (
@@ -681,7 +684,10 @@ export default function SessionDetailPage() {
                 </div>
                 {/* 펼침 시: 고정 높이+스크롤 (내용이 길어도 카드 크기 유지) */}
                 {!isCollapsed && (
-                  <div className="px-5 pb-5 max-h-72 overflow-y-auto text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div
+                    className="px-5 pb-5 text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"
+                    style={{ maxHeight: "18rem", overflowY: "auto" }}
+                  >
                     {msg.content}
                   </div>
                 )}

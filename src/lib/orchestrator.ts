@@ -169,13 +169,6 @@ export async function runDebateSessionStream(
 
         // 무료 티어 RPM 초과 방지: 다음 페르소나 호출 전 딜레이
         await sleep(INTER_CALL_DELAY_MS);
-
-        send("message_done", {
-          speaker: persona.name,
-          roundNo: round,
-          content: response.content,
-          roleType: `persona_${persona.id}`,
-        });
       }
     }
 
